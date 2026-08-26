@@ -9,7 +9,7 @@ fn opens_application_when_requested() {
     let result = open_application(&mut computer, "Chrome");
 
     assert!(result.is_ok());
-    assert_eq!(computer.opened_application, Some("Chrome".to_string()))
+    assert_eq!(computer.executed_command, Some("Chrome".to_string()))
 }
 
 #[test]

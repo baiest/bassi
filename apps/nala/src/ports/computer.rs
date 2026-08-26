@@ -1,8 +1,8 @@
 #[derive(Debug)]
 pub enum ComputerError {
-    OpenApplicationFailed,
+    CommandFailed,
 }
 
 pub trait Computer {
-    fn execute_command(&mut self, name: &str) -> Result<(), ComputerError>;
+    fn execute_command(&mut self, command: &str) -> Result<(), ComputerError>;
 }

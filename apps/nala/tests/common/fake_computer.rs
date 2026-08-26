@@ -1,14 +1,14 @@
 use nala::ports::computer::{Computer, ComputerError};
 
 pub struct FakeComputer {
-    pub opened_application: Option<String>,
+    pub executed_command: Option<String>,
     pub should_fail: bool,
 }
 
 impl FakeComputer {
     pub fn new() -> Self {
         Self {
-            opened_application: None,
+            executed_command: None,
             should_fail: false,
         }
     }
@@ -17,10 +17,10 @@ impl FakeComputer {
 impl Computer for FakeComputer {
     fn execute_command(&mut self, name: &str) -> Result<(), ComputerError> {
         if self.should_fail {
-            return Err(ComputerError::OpenApplicationFailed);
+            return Err(ComputerError::CommandFailed);
         }
 
-        self.opened_application = Some(name.to_string());
+        self.executed_command = Some(name.to_string());
 
         Ok(())
     }

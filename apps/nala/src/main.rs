@@ -1,12 +1,15 @@
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::process::windows::Windows as WindowsProcess;
-use nala::ports::computer::Computer;
+use nala::application::tools::Tool;
+use nala::application::tools::execute_command::{ExecuteCommandArgs, ExecuteCommandTool};
 
 fn main() {
     let process = WindowsProcess::new();
-    let mut computer = Windows::new(process);
+    let computer = Windows::new(process);
+    let mut tool = ExecuteCommandTool::new(computer);
+    let args = ExecuteCommandArgs {
+        command: "start chrome".to_string(),
+    };
 
-    computer
-        .execute_command("spotify")
-        .expect("Failed to open chrome")
+    tool.execute(args).expect("Failed to open chrome")
 }
