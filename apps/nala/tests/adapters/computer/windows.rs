@@ -8,7 +8,7 @@ fn opens_application() {
     let process = FakeProcess::new();
     let mut computer = Windows::new(process);
 
-    let result = computer.open_application("Chrome");
+    let result = computer.excecute_command("Chrome");
 
     assert!(result.is_ok())
 }
