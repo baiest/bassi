@@ -31,5 +31,10 @@ Allowed actions: `Add`, `Fix`, `Cut`, `Optimise`, `Refactor`, `Delete`, `Docs`, 
 
 - One branch per ticket, opened against `main`.
 - CI (`scripts/check_lf.sh`, `check_commit.sh`, `check_rust.sh`) must pass.
-- `main` is protected: no direct pushes, no force-push, linear history only.
-- On approval, `auto-merge.yml` squash-merges and deletes the branch.
+- `main` is protected: no direct pushes, no force-push, linear history only
+  (merge commits are disabled repo-wide; only squash or rebase allowed).
+- On approval, `auto-merge.yml` **rebase**-merges and deletes the branch —
+  the default, since it preserves atomic commits as-is.
+- If a PR has messy/WIP commits that shouldn't land individually on `main`,
+  don't rely on auto-merge: merge it manually with
+  `gh pr merge --squash --delete-branch`.

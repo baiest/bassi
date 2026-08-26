@@ -16,8 +16,11 @@ jobs:
       github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge (squash + delete branch)
+      - name: Enable auto-merge (rebase + delete branch)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash --delete-branch "$PR_URL"
+        # Default is rebase: keeps atomic commits from the branch as-is.
+        # For a PR with messy/WIP commits, don't rely on this — merge it
+        # manually instead with `gh pr merge --squash --delete-branch`.
+        run: gh pr merge --auto --rebase --delete-branch "$PR_URL"
