@@ -1,3 +1,4 @@
+pub mod dispatcher;
 pub mod execute_command;
 pub mod registry;
 
