@@ -1,0 +1,15 @@
+[Action]: [title]
+
+What: [what changed]
+Why: [why it changed]
+
+[Ticket ID]
+
+# Format rules (checked by scripts/check_commit.sh):
+# - Title: "[Action]: [title]", max 72 chars.
+# - Allowed actions: Add, Fix, Cut, Optimise, Refactor, Delete, Docs, Style, Merge
+# - Blank line between title and body.
+# - Body must include a "What:" and a "Why:" line, each max 100 chars.
+# - Ticket ID line is optional.
+#
+# Delete these comment lines and any bracketed placeholder you don't need.
