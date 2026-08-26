@@ -15,7 +15,7 @@ impl FakeComputer {
 }
 
 impl Computer for FakeComputer {
-    fn open_application(&mut self, name: &str) -> Result<(), ComputerError> {
+    fn excecute_command(&mut self, name: &str) -> Result<(), ComputerError> {
         if self.should_fail {
             return Err(ComputerError::OpenApplicationFailed);
         }
