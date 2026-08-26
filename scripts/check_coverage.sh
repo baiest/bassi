@@ -31,7 +31,9 @@ fi
 
 # 3. Generate lcov report (for artifacts / external tooling)
 # main.rs is excluded: it's just wiring (composition root), not testable logic.
-IGNORE_REGEX='main\.rs$'
+# adapters/process/windows.rs is excluded: it's a thin OS boundary (Command::new)
+# that spawns real processes and can't be exercised portably in CI.
+IGNORE_REGEX='main\.rs$|adapters[/\\]process[/\\]windows\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 
