@@ -14,9 +14,9 @@ impl<P> Windows<P> {
 }
 
 impl<P: Process> Computer for Windows<P> {
-    fn execute_command(&mut self, name: &str) -> Result<(), ComputerError> {
+    fn execute_command(&mut self, command: &str) -> Result<(), ComputerError> {
         self.process
-            .spawn("cmd", &["/C", "start", "", name])
-            .map_err(|_| ComputerError::OpenApplicationFailed)
+            .spawn("cmd", &["/C", command])
+            .map_err(|_| ComputerError::CommandFailed)
     }
 }
