@@ -7,6 +7,6 @@ fn main() {
     let mut computer = Windows::new(process);
 
     computer
-        .excecute_command("spotify")
+        .execute_command("spotify")
         .expect("Failed to open chrome")
 }

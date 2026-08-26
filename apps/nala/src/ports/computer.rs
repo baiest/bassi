@@ -4,5 +4,5 @@ pub enum ComputerError {
 }
 
 pub trait Computer {
-    fn excecute_command(&mut self, name: &str) -> Result<(), ComputerError>;
+    fn execute_command(&mut self, name: &str) -> Result<(), ComputerError>;
 }
