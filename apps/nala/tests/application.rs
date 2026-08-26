@@ -6,3 +6,6 @@ mod computer;
 
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
+
+#[path = "application/tools/registry.rs"]
+mod registry;
