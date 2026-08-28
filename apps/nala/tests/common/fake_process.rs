@@ -15,13 +15,17 @@ impl FakeProcess {
 }
 
 impl Process for FakeProcess {
-    fn spawn(&mut self, program: &str, _args: &[&str]) -> Result<(), ProcessError> {
+    const SYSTEM_DESCRIPTION: &'static str = "This is a fake process.";
+
+    fn spawn(&mut self, program: &str, _args: &[&str]) -> Result<String, ProcessError> {
         if self.should_fail {
-            return Err(ProcessError::ProcessFailed);
+            return Err(ProcessError::ProcessFailed(
+                "fake process failed".to_string(),
+            ));
         }
 
         self.spawned = Some(program.to_string());
 
-        Ok(())
+        Ok(String::new())
     }
 }

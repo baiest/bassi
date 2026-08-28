@@ -20,6 +20,10 @@ impl ToolRegistry {
     pub fn get(&self, name: &str) -> Option<&ToolDefinition> {
         self.tools.get(name)
     }
+
+    pub fn definitions(&self) -> Vec<&ToolDefinition> {
+        self.tools.values().collect()
+    }
 }
 
 impl Default for ToolRegistry {

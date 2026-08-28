@@ -1,7 +1,11 @@
+#[derive(Debug)]
 pub enum ProcessError {
-    ProcessFailed,
+    ProcessFailed(String),
+    InvalidArguments(String),
 }
 
 pub trait Process {
-    fn spawn(&mut self, program: &str, args: &[&str]) -> Result<(), ProcessError>;
+    const SYSTEM_DESCRIPTION: &'static str;
+
+    fn spawn(&mut self, program: &str, args: &[&str]) -> Result<String, ProcessError>;
 }
