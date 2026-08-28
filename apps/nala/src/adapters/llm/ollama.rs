@@ -16,7 +16,7 @@ pub struct OllamaLlm {
 impl OllamaLlm {
     pub fn new(base_url: &str, model: &str) -> Result<Self, LlmError> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(300))
             .build()
             .map_err(|error| LlmError::RequestFailed(error.to_string()))?;
 
@@ -39,6 +39,10 @@ impl Llm for OllamaLlm {
             messages: wire::to_wire_messages(messages),
             tools: wire::to_wire_tools(tools),
             stream: false,
+            // Extended "thinking" adds tens of seconds of latency per call
+            // on models that support it (e.g. gemma4), which multiplies
+            // badly across a tool-call loop. Tool selection doesn't need it.
+            think: false,
         };
 
         let response = self.post_chat(&request)?;
@@ -90,6 +94,7 @@ mod wire {
         pub messages: Vec<OllamaMessage>,
         pub tools: Vec<ChatTool<'a>>,
         pub stream: bool,
+        pub think: bool,
     }
 
     #[derive(Serialize)]
