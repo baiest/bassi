@@ -26,6 +26,7 @@ fn sends_model_and_messages_in_request() {
     assert!(request_body.contains(r#""model":"test-model""#));
     assert!(request_body.contains(r#""content":"hello""#));
     assert!(request_body.contains(r#""stream":false"#));
+    assert!(request_body.contains(r#""think":false"#));
 }
 
 #[test]
