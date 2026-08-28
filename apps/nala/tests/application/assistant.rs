@@ -1,10 +1,13 @@
-use nala::application::{
-    assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
-    tools::{
-        Tool,
-        dispatcher::{ToolDispatcher, Tools},
-        execute_command::ExecuteCommandTool,
-        registry::ToolRegistry,
+use nala::{
+    adapters::events::console::ConsoleEventSink,
+    application::{
+        assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
+        tools::{
+            Tool,
+            dispatcher::{ToolDispatcher, Tools},
+            execute_command::ExecuteCommandTool,
+            registry::ToolRegistry,
+        },
     },
 };
 
@@ -22,7 +25,10 @@ fn registry() -> ToolRegistry {
     registry
 }
 
-fn assistant_with<L>(llm: L, computer: FakeComputer) -> Assistant<L, ToolDispatcher<FakeComputer>>
+fn assistant_with<L>(
+    llm: L,
+    computer: FakeComputer,
+) -> Assistant<L, ToolDispatcher<FakeComputer>, ConsoleEventSink>
 where
     L: nala::ports::llm::Llm,
 {
@@ -31,7 +37,9 @@ where
     let mut dispatcher = ToolDispatcher::new();
     dispatcher.register(Tools::ExecuteCommand(tool));
 
-    Assistant::new(llm, dispatcher, registry())
+    let events = ConsoleEventSink;
+
+    Assistant::new(llm, dispatcher, registry(), events)
 }
 
 #[test]

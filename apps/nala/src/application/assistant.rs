@@ -1,4 +1,7 @@
+use std::time::Instant;
+
 use crate::application::tools::registry::ToolRegistry;
+use crate::ports::events::{Event, EventSink};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
 use crate::ports::tool_dispatcher::ToolDispatcher;
 
@@ -23,11 +26,12 @@ Always use the provided computer context when generating commands.
 
 Do not guess usernames, paths, directories, operating systems, or shells.";
 
-pub struct Assistant<L, D> {
+pub struct Assistant<L, D, E> {
     llm: L,
     dispatcher: D,
     registry: ToolRegistry,
     messages: Vec<Message>,
+    events: E,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,17 +50,19 @@ where
     ToolCallLimitExceeded,
 }
 
-impl<L, D> Assistant<L, D>
+impl<L, D, E> Assistant<L, D, E>
 where
     L: Llm,
     D: ToolDispatcher<Output = String>,
     D::Error: std::error::Error + 'static,
+    E: EventSink,
 {
-    pub fn new(llm: L, dispatcher: D, registry: ToolRegistry) -> Self {
+    pub fn new(llm: L, dispatcher: D, registry: ToolRegistry, events: E) -> Self {
         Self {
             llm,
             dispatcher,
             registry,
+            events,
             messages: vec![system_message(SYSTEM_PROMPT.to_string())],
         }
     }
@@ -79,6 +85,10 @@ where
         &mut self,
         input: &str,
     ) -> Result<D::Output, AssistantError<LlmError, D::Error>> {
+        let request_start = Instant::now();
+
+        self.events.emit(Event::RequestStarted);
+
         self.push_history(user_message(input));
 
         let mut messages = self.build_prompt_messages()?;
@@ -88,30 +98,84 @@ where
         let mut tool_call_count: usize = 0;
 
         loop {
-            let response = self
-                .llm
-                .generate(&messages, &tools)
-                .map_err(AssistantError::Llm)?;
+            self.events.emit(Event::LlmStarted);
+
+            let start = Instant::now();
+            let response = self.llm.generate(&messages, &tools);
+
+            let duration = start.elapsed();
+
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    let duration = request_start.elapsed();
+
+                    self.events.emit(Event::RequestFailed {
+                        duration,
+                        error: error.to_string(),
+                    });
+
+                    return Err(AssistantError::Llm(error));
+                }
+            };
+
+            self.events.emit(Event::LlmCompleted { duration });
 
             match response {
                 LlmResponse::ToolCall(tool_call) => {
                     messages.push(assistant_tool_call_message(tool_call.clone()));
 
                     if executed_tools.contains(&tool_call) {
+                        let duration = request_start.elapsed();
+
+                        self.events.emit(Event::RequestFailed {
+                            duration,
+                            error: "loop detected".to_string(),
+                        });
+
                         return Err(AssistantError::LoopDetected);
                     }
                     executed_tools.push(tool_call.clone());
                     tool_call_count += 1;
 
+                    let tool_name = tool_call.name.clone();
+                    let tool_args = tool_call.arguments.clone();
+
+                    self.events.emit(Event::ToolStarted {
+                        name: tool_name.clone(),
+                        arguments: tool_args,
+                    });
+
+                    let start = Instant::now();
+
                     let output = handle_tool_call(&mut self.dispatcher, tool_call);
+
+                    let duration = start.elapsed();
+
+                    self.events.emit(Event::ToolCompleted {
+                        name: tool_name,
+                        duration,
+                    });
+
                     messages.push(tool_result_message(output));
 
                     if tool_call_count >= MAX_TOOL_CALLS {
+                        let duration = request_start.elapsed();
+
+                        self.events.emit(Event::RequestFailed {
+                            duration,
+                            error: "tool call limit exceeded".to_string(),
+                        });
+
                         return Err(AssistantError::ToolCallLimitExceeded);
                     }
                 }
                 LlmResponse::Text(text) => {
                     self.push_history(assistant_text_message(text.clone()));
+
+                    let duration = request_start.elapsed();
+
+                    self.events.emit(Event::RequestCompleted { duration });
 
                     break Ok(text);
                 }
