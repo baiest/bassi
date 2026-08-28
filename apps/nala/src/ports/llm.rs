@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::application::tools::ToolDefinition;
+use crate::ports::tool::ToolDefinition;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ToolCall {

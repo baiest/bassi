@@ -3,11 +3,10 @@ pub mod execute_command;
 pub mod ping;
 pub mod registry;
 
-pub struct ToolDefinition {
-    pub name: &'static str,
-    pub description: String,
-    pub parameters: &'static str,
-}
+// Re-exported so existing `application::tools::ToolDefinition` call sites
+// keep working — the type itself lives in ports/tool.rs since it crosses
+// the application/adapter boundary (Llm and ToolDispatcher ports use it).
+pub use crate::ports::tool::ToolDefinition;
 
 pub trait Tool {
     type Args;

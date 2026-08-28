@@ -1,6 +1,6 @@
 use nala::adapters::llm::ollama::OllamaLlm;
-use nala::application::tools::ToolDefinition;
 use nala::ports::llm::{Llm, LlmError, LlmResponse, Message};
+use nala::ports::tool::ToolDefinition;
 
 use crate::http_stub::HttpStub;
 

@@ -1,8 +1,8 @@
 use reqwest::blocking::Client;
 
 use crate::{
-    application::tools::ToolDefinition,
     ports::llm::{Llm, LlmError, LlmResponse, Message},
+    ports::tool::ToolDefinition,
 };
 
 use wire::{ChatRequest, ChatResponse};
@@ -80,8 +80,8 @@ mod wire {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        application::tools::ToolDefinition,
         ports::llm::{LlmError, LlmResponse, Message, ToolCall},
+        ports::tool::ToolDefinition,
     };
 
     #[derive(Serialize)]
