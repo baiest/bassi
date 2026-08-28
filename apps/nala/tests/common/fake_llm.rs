@@ -31,8 +31,10 @@ impl Llm for FakeLlm {
     }
 }
 
-/// Unique arguments per call avoid tripping loop detection, so this can
-/// exercise the MAX_TOOL_CALLS limit on its own.
+/// Targets a tool name that isn't registered, so every call fails with a
+/// dispatch error and never lands in `succeeded_tools`. Combined with
+/// unique arguments per call, this avoids tripping loop detection, so it
+/// can exercise the MAX_TOOL_CALLS limit on its own.
 #[derive(Default)]
 pub struct AlwaysCallsToolLlm {
     calls: u32,
@@ -54,7 +56,7 @@ impl Llm for AlwaysCallsToolLlm {
         self.calls += 1;
 
         Ok(LlmResponse::ToolCall(ToolCall {
-            name: "execute_command".to_string(),
+            name: "unregistered_tool".to_string(),
             arguments: format!(r#"{{"command":"echo {calls}"}}"#),
         }))
     }
@@ -132,6 +134,63 @@ impl Llm for AlwaysRepliesTextLlm {
         _tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         Ok(LlmResponse::Text("ok".to_string()))
+    }
+}
+
+#[derive(Default)]
+pub struct ResolvesInOneToolCallLlm {
+    calls: u32,
+}
+
+impl ResolvesInOneToolCallLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for ResolvesInOneToolCallLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        self.calls += 1;
+
+        if self.calls == 1 {
+            return Ok(LlmResponse::ToolCall(ToolCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"date"}"#.to_string(),
+            }));
+        }
+
+        Ok(LlmResponse::Text("it's 10:00 AM".to_string()))
+    }
+}
+
+#[derive(Default)]
+pub struct RetriesSameToolWithDifferentArgsLlm {
+    calls: u32,
+}
+
+impl RetriesSameToolWithDifferentArgsLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for RetriesSameToolWithDifferentArgsLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        let calls = self.calls;
+        self.calls += 1;
+
+        Ok(LlmResponse::ToolCall(ToolCall {
+            name: "execute_command".to_string(),
+            arguments: format!(r#"{{"command":"date-variant-{calls}"}}"#),
+        }))
     }
 }
 
