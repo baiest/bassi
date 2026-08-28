@@ -95,8 +95,8 @@ where
         let tools = self.registry.definitions();
 
         let mut executed_tools: Vec<ToolCall> = Vec::new();
-        let mut succeeded_tools: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut succeeded_tools: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let mut tool_call_count: usize = 0;
 
         loop {
@@ -129,10 +129,21 @@ where
 
                     // A tool that already succeeded this turn is done; a
                     // retry (even with different arguments) means the model
-                    // didn't recognize the task was already resolved.
-                    if executed_tools.contains(&tool_call)
-                        || succeeded_tools.contains(&tool_call.name)
-                    {
+                    // didn't recognize the task was already resolved. Since
+                    // we already have a usable result, answer with it
+                    // instead of failing the whole request.
+                    if let Some(output) = succeeded_tools.get(&tool_call.name) {
+                        let text = output.clone();
+                        self.push_history(assistant_text_message(text.clone()));
+
+                        let duration = request_start.elapsed();
+
+                        self.events.emit(Event::RequestCompleted { duration });
+
+                        return Ok(text);
+                    }
+
+                    if executed_tools.contains(&tool_call) {
                         let duration = request_start.elapsed();
 
                         self.events.emit(Event::RequestFailed {
@@ -160,7 +171,7 @@ where
                     let duration = start.elapsed();
 
                     if !output.starts_with("ERROR:") {
-                        succeeded_tools.insert(tool_name.clone());
+                        succeeded_tools.insert(tool_name.clone(), output.clone());
                     }
 
                     self.events.emit(Event::ToolCompleted {
