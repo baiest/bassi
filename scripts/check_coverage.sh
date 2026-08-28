@@ -31,11 +31,12 @@ fi
 
 # 3. Generate lcov report (for artifacts / external tooling)
 # main.rs is excluded: it's just wiring (composition root), not testable logic.
-# adapters/process/windows.rs and adapters/mcp/child_process.rs are excluded:
-# both are thin OS boundaries (Command::new spawning a real process/child)
-# that can't be exercised portably in CI. The protocol logic they carry
-# (StdioMcpClient) is covered separately against an in-memory Transport fake.
-IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\]child_process)\.rs$'
+# adapters/process/windows.rs, adapters/mcp/child_process.rs, and
+# adapters/mcp/job_object.rs are excluded: all are thin OS boundaries
+# (Command::new / Win32 Job Objects) that can't be exercised portably in CI.
+# The protocol logic they carry (StdioMcpClient) is covered separately
+# against an in-memory Transport fake.
+IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object))\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 
