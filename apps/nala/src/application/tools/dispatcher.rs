@@ -5,11 +5,16 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
+type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+#[derive(Debug, thiserror::Error)]
 pub enum ToolDispatcherError {
+    #[error("tool not found")]
     ToolNotFound,
-    ToolErrorParsingArguments(String),
-    ToolExecuteError(String),
+    #[error("failed to parse tool call arguments: {0}")]
+    ToolErrorParsingArguments(#[source] BoxedError),
+    #[error("tool execution failed: {0}")]
+    ToolExecuteError(#[source] BoxedError),
 }
 
 /// One variant per `Tool` implementation the dispatcher knows how to run.
@@ -50,21 +55,21 @@ impl<C: Computer> ToolDispatcherPort for ToolDispatcher<C> {
                 Tools::ExecuteCommand(tool) if tool_call.name == ExecuteCommandTool::<C>::NAME => {
                     let args = ExecuteCommandTool::<C>::parse_arguments(&tool_call.arguments)
                         .map_err(|error| {
-                            ToolDispatcherError::ToolErrorParsingArguments(format!("{error:?}"))
+                            ToolDispatcherError::ToolErrorParsingArguments(Box::new(error))
                         })?;
 
-                    return tool.execute(args).map_err(|error| {
-                        ToolDispatcherError::ToolExecuteError(format!("{error:?}"))
-                    });
+                    return tool
+                        .execute(args)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
                 Tools::Ping(tool) if tool_call.name == PingTool::NAME => {
                     PingTool::parse_arguments(&tool_call.arguments).map_err(|error| {
-                        ToolDispatcherError::ToolErrorParsingArguments(format!("{error:?}"))
+                        ToolDispatcherError::ToolErrorParsingArguments(Box::new(error))
                     })?;
 
-                    return tool.execute(()).map_err(|error| {
-                        ToolDispatcherError::ToolExecuteError(format!("{error:?}"))
-                    });
+                    return tool
+                        .execute(())
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
                 _ => continue,
             }
@@ -78,7 +83,7 @@ impl<C: Computer> ToolDispatcherPort for ToolDispatcher<C> {
             if let Tools::ExecuteCommand(tool) = tool {
                 return tool
                     .context()
-                    .map_err(|error| ToolDispatcherError::ToolExecuteError(format!("{error:?}")));
+                    .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
             }
         }
 

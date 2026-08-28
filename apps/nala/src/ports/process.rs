@@ -1,6 +1,8 @@
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProcessError {
+    #[error("process failed: {0}")]
     ProcessFailed(String),
+    #[error("invalid arguments: {0}")]
     InvalidArguments(String),
 }
 

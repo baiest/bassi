@@ -48,7 +48,7 @@ fn main() {
                 println!("Respuesta recibida con éxito.");
             }
             Err(e) => {
-                eprintln!("Error: No se pudo procesar la petición. Detalles: {:?}", e);
+                eprintln!("Error: No se pudo procesar la petición. Detalles: {e}");
             }
         }
 
