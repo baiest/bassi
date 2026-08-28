@@ -37,7 +37,7 @@ impl Llm for OllamaLlm {
         let request = ChatRequest {
             model: &self.model,
             messages: wire::to_wire_messages(messages),
-            tools: wire::to_wire_tools(tools)?,
+            tools: wire::to_wire_tools(tools),
             stream: false,
         };
 
@@ -80,7 +80,7 @@ mod wire {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        ports::llm::{LlmError, LlmResponse, Message, ToolCall},
+        ports::llm::{LlmResponse, Message, ToolCall},
         ports::tool::ToolDefinition,
     };
 
@@ -172,25 +172,16 @@ mod wire {
             .collect()
     }
 
-    pub fn to_wire_tools<'a>(tools: &[&'a ToolDefinition]) -> Result<Vec<ChatTool<'a>>, LlmError> {
+    pub fn to_wire_tools<'a>(tools: &[&'a ToolDefinition]) -> Vec<ChatTool<'a>> {
         tools
             .iter()
-            .map(|tool| {
-                let parameters = serde_json::from_str(tool.parameters).map_err(|error| {
-                    LlmError::InvalidToolDefinition(format!(
-                        "Invalid tool parameters for '{}': {}\nJSON: {}",
-                        tool.name, error, tool.parameters
-                    ))
-                })?;
-
-                Ok(ChatTool {
-                    r#type: "function",
-                    function: FunctionDefinition {
-                        name: tool.name,
-                        description: &tool.description,
-                        parameters,
-                    },
-                })
+            .map(|tool| ChatTool {
+                r#type: "function",
+                function: FunctionDefinition {
+                    name: tool.name,
+                    description: &tool.description,
+                    parameters: tool.parameters.clone(),
+                },
             })
             .collect()
     }

@@ -31,7 +31,7 @@ fn can_register_multiple_tools() {
     let another_tool = ToolDefinition {
         name: "another_tool",
         description: "another".to_string(),
-        parameters: "{}",
+        parameters: serde_json::json!({}),
     };
 
     registry.register(execute_command);
