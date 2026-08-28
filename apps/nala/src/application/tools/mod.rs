@@ -28,7 +28,7 @@ pub trait Tool {
 
     fn definition() -> ToolDefinition {
         ToolDefinition {
-            name: Self::NAME,
+            name: Self::NAME.to_string(),
             description: Self::DESCRIPTION.to_string(),
             parameters: Self::parameters(),
         }

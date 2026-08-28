@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::ToolDefinition;
 
 pub struct ToolRegistry {
-    tools: HashMap<&'static str, ToolDefinition>,
+    tools: HashMap<String, ToolDefinition>,
 }
 
 impl ToolRegistry {
@@ -14,7 +14,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, definition: ToolDefinition) {
-        self.tools.insert(definition.name, definition);
+        self.tools.insert(definition.name.clone(), definition);
     }
 
     pub fn get(&self, name: &str) -> Option<&ToolDefinition> {

@@ -1,5 +1,6 @@
+#[derive(Debug, Clone)]
 pub struct ToolDefinition {
-    pub name: &'static str,
+    pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
 }
