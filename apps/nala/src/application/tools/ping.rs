@@ -21,7 +21,10 @@ impl Tool for PingTool {
     const NAME: &'static str = "ping";
     const DESCRIPTION: &'static str =
         "Check that the assistant's tool dispatcher is responding. Takes no arguments.";
-    const PARAMETERS: &'static str = r#"{"type": "object", "properties": {}}"#;
+
+    fn parameters() -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
 
     fn execute(&mut self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         Ok("pong".to_string())

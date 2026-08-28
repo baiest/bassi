@@ -14,8 +14,6 @@ pub enum LlmError {
     RequestFailed(String),
     #[error("invalid response: {0}")]
     InvalidResponse(String),
-    #[error("invalid tool definition: {0}")]
-    InvalidToolDefinition(String),
 }
 
 #[derive(Debug)]

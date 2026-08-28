@@ -15,7 +15,12 @@ pub trait Tool {
 
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
-    const PARAMETERS: &'static str;
+
+    /// The JSON schema for `Args`, published to the LLM alongside the tool's
+    /// name and description. Implementations should derive this from `Args`
+    /// itself (e.g. via `schemars::schema_for!`) rather than writing it by
+    /// hand, so the two can never drift apart.
+    fn parameters() -> serde_json::Value;
 
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error>;
 
@@ -25,7 +30,7 @@ pub trait Tool {
         ToolDefinition {
             name: Self::NAME,
             description: Self::DESCRIPTION.to_string(),
-            parameters: Self::PARAMETERS,
+            parameters: Self::parameters(),
         }
     }
 

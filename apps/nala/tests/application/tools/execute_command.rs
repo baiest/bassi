@@ -1,6 +1,7 @@
 use crate::fake_computer::FakeComputer;
 use nala::application::tools::Tool;
 use nala::application::tools::execute_command::{ExecuteCommandArgs, ExecuteCommandTool};
+use schemars::schema_for;
 
 #[test]
 fn executes_command() {
@@ -48,6 +49,16 @@ fn returns_explicit_success_when_command_succeeds_with_output() {
 
     assert!(result.starts_with("SUCCESS"));
     assert!(result.contains("some stdout"));
+}
+
+#[test]
+fn published_schema_matches_the_derived_schema_of_args() {
+    let expected = serde_json::to_value(schema_for!(ExecuteCommandArgs))
+        .expect("schema should serialize to JSON");
+
+    let definition = ExecuteCommandTool::<FakeComputer>::definition();
+
+    assert_eq!(definition.parameters, expected);
 }
 
 #[test]

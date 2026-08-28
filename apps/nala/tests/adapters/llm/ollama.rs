@@ -1,6 +1,5 @@
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::ports::llm::{Llm, LlmError, LlmResponse, Message};
-use nala::ports::tool::ToolDefinition;
 
 use crate::http_stub::HttpStub;
 
@@ -95,21 +94,6 @@ fn fails_on_malformed_json() {
     let result = llm.generate(&[], &[]);
 
     assert!(matches!(result, Err(LlmError::InvalidResponse(_))));
-}
-
-#[test]
-fn fails_on_invalid_tool_definition_parameters() {
-    let mut llm = OllamaLlm::new("http://127.0.0.1:1", "test-model").unwrap();
-
-    let tool = ToolDefinition {
-        name: "broken_tool",
-        description: "a tool with invalid parameters".to_string(),
-        parameters: "not json",
-    };
-
-    let result = llm.generate(&[], &[&tool]);
-
-    assert!(matches!(result, Err(LlmError::InvalidToolDefinition(_))));
 }
 
 /// Exercises the adapter against a real, locally running Ollama server.
