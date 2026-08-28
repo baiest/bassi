@@ -8,10 +8,13 @@ pub struct ToolCall {
     pub arguments: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LlmError {
+    #[error("request failed: {0}")]
     RequestFailed(String),
+    #[error("invalid response: {0}")]
     InvalidResponse(String),
+    #[error("invalid tool definition: {0}")]
     InvalidToolDefinition(String),
 }
 

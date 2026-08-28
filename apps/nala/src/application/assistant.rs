@@ -25,11 +25,19 @@ pub struct Assistant<L, D> {
     messages: Vec<Message>,
 }
 
-#[derive(Debug)]
-pub enum AssistantError<L, D> {
-    Llm(L),
-    Tool(D),
+#[derive(Debug, thiserror::Error)]
+pub enum AssistantError<L, D>
+where
+    L: std::error::Error + 'static,
+    D: std::error::Error + 'static,
+{
+    #[error("LLM error: {0}")]
+    Llm(#[source] L),
+    #[error("tool error: {0}")]
+    Tool(#[source] D),
+    #[error("loop detected: the same tool call was requested twice in a row")]
     LoopDetected,
+    #[error("tool call limit exceeded")]
     ToolCallLimitExceeded,
 }
 
@@ -37,7 +45,7 @@ impl<L, D> Assistant<L, D>
 where
     L: Llm,
     D: ToolDispatcher<Output = String>,
-    D::Error: std::fmt::Debug,
+    D::Error: std::error::Error + 'static,
 {
     pub fn new(llm: L, dispatcher: D, registry: ToolRegistry) -> Self {
         Self {
@@ -114,11 +122,11 @@ where
 fn handle_tool_call<D>(dispatcher: &mut D, tool_call: ToolCall) -> String
 where
     D: ToolDispatcher<Output = String>,
-    D::Error: std::fmt::Debug,
+    D::Error: std::error::Error + 'static,
 {
     match dispatcher.dispatch(tool_call) {
         Ok(output) => output,
-        Err(error) => format!("ERROR: {error:?}"),
+        Err(error) => format!("ERROR: {error}"),
     }
 }
 

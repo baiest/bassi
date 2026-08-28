@@ -9,8 +9,9 @@ pub struct ComputerContext {
     pub current_dir: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ComputerError {
+    #[error("command failed: {0}")]
     CommandFailed(String),
 }
 

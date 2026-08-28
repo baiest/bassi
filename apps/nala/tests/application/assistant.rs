@@ -73,6 +73,24 @@ fn returns_tool_error_when_context_fails() {
 }
 
 #[test]
+fn chains_down_to_the_underlying_tool_error() {
+    use std::error::Error as StdError;
+
+    let mut computer = FakeComputer::new();
+    computer.should_fail_context = true;
+
+    let mut assistant = assistant_with(FakeLlm::new(), computer);
+
+    let error = assistant.process("open chrome").unwrap_err();
+
+    // AssistantError -> ToolDispatcherError -> the tool's own error, each
+    // level readable through Display and reachable through source().
+    assert!(!error.to_string().is_empty());
+    let source = error.source().expect("AssistantError should have a source");
+    assert!(source.source().is_some());
+}
+
+#[test]
 fn feeds_tool_error_back_to_llm() {
     let mut computer = FakeComputer::new();
     computer.should_fail = true;
