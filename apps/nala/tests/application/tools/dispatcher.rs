@@ -1,9 +1,12 @@
 use crate::fake_computer::FakeComputer;
+use crate::fake_mcp::FakeMcpClient;
 use nala::application::tools::Tool;
+use nala::application::tools::computer_use::ComputerUseToolset;
 use nala::application::tools::dispatcher::{ToolDispatcher, ToolDispatcherError, Tools};
 use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::ping::PingTool;
 use nala::ports::llm::ToolCall;
+use nala::ports::mcp::McpToolResult;
 use nala::ports::tool_dispatcher::ToolDispatcher as _;
 
 #[test]
@@ -11,7 +14,7 @@ fn executes_requested_tool() {
     let computer = FakeComputer::new();
     let tool = ExecuteCommandTool::new(computer);
 
-    let mut dispatcher = ToolDispatcher::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
 
     dispatcher.register(Tools::ExecuteCommand(tool));
 
@@ -30,7 +33,7 @@ fn returns_error_when_tool_is_not_found() {
     let computer = FakeComputer::new();
     let tool = ExecuteCommandTool::new(computer);
 
-    let mut dispatcher = ToolDispatcher::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
 
     dispatcher.register(Tools::ExecuteCommand(tool));
 
@@ -49,7 +52,7 @@ fn dispatches_to_the_matching_tool_among_several() {
     let computer = FakeComputer::new();
     let execute_command = ExecuteCommandTool::new(computer);
 
-    let mut dispatcher = ToolDispatcher::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
 
     dispatcher.register(Tools::ExecuteCommand(execute_command));
     dispatcher.register(Tools::Ping(PingTool::new()));
@@ -64,11 +67,12 @@ fn dispatches_to_the_matching_tool_among_several() {
         arguments: r#"{"command":"start chrome"}"#.to_string(),
     };
 
-    assert_eq!(dispatcher.dispatch(ping_call).unwrap(), "pong");
+    assert_eq!(dispatcher.dispatch(ping_call).unwrap().text, "pong");
     assert!(
         dispatcher
             .dispatch(execute_call)
             .unwrap()
+            .text
             .starts_with("SUCCESS")
     );
 }
@@ -78,7 +82,7 @@ fn returns_computer_context_from_the_registered_computer_tool() {
     let computer = FakeComputer::new();
     let tool = ExecuteCommandTool::new(computer);
 
-    let mut dispatcher = ToolDispatcher::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
     dispatcher.register(Tools::ExecuteCommand(tool));
 
     let result = dispatcher.get_context();
@@ -101,7 +105,7 @@ fn returns_error_when_dispatching_with_invalid_arguments() {
     let computer = FakeComputer::new();
     let tool = ExecuteCommandTool::new(computer);
 
-    let mut dispatcher = ToolDispatcher::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
     dispatcher.register(Tools::ExecuteCommand(tool));
 
     let tool_call = ToolCall {
@@ -128,4 +132,28 @@ fn parses_tool_call_arguments() {
         .expect("Failed to parse arguments");
 
     assert_eq!(args.command, "start chrome")
+}
+
+#[test]
+fn dispatches_to_the_computer_use_toolset_and_carries_images_through() {
+    let client = FakeMcpClient::new()
+        .with_tool("screenshot", "Take a screenshot")
+        .returning(McpToolResult {
+            text: "here is the screen".to_string(),
+            images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+        });
+    let toolset = ComputerUseToolset::connect(client, &["screenshot"]).unwrap();
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    dispatcher.register(Tools::ComputerUse(toolset));
+
+    let tool_call = ToolCall {
+        name: "screenshot".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert_eq!(outcome.text, "here is the screen");
+    assert_eq!(outcome.images, vec!["YmFzZTY0ZGF0YQ==".to_string()]);
 }

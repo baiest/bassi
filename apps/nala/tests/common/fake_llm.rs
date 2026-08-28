@@ -215,3 +215,70 @@ impl Llm for RepeatsSameToolCallLlm {
         }))
     }
 }
+
+/// Models a multi-step flow (e.g. screenshot -> click -> screenshot):
+/// requests two *distinct* tool calls, then answers with text. Since no
+/// call repeats identically, this must resolve without tripping
+/// `LoopDetected`.
+#[derive(Default)]
+pub struct ChainsDistinctToolCallsThenAnswersLlm {
+    calls: u32,
+}
+
+impl ChainsDistinctToolCallsThenAnswersLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for ChainsDistinctToolCallsThenAnswersLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 | 1 => Ok(LlmResponse::ToolCall(ToolCall {
+                name: "execute_command".to_string(),
+                arguments: format!(r#"{{"command":"date-step-{calls}"}}"#),
+            })),
+            _ => Ok(LlmResponse::Text("done".to_string())),
+        }
+    }
+}
+
+/// Requests the exact same tool call twice, then answers with text. Two
+/// identical repeats is below `MAX_IDENTICAL_REPEATS`, so this must
+/// resolve normally rather than triggering `LoopDetected`.
+#[derive(Default)]
+pub struct RepeatsSameCallTwiceThenAnswersLlm {
+    calls: u32,
+}
+
+impl RepeatsSameCallTwiceThenAnswersLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for RepeatsSameCallTwiceThenAnswersLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 | 1 => Ok(LlmResponse::ToolCall(ToolCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"date"}"#.to_string(),
+            })),
+            _ => Ok(LlmResponse::Text("done".to_string())),
+        }
+    }
+}

@@ -30,6 +30,10 @@ pub struct Message {
     /// Set only on `role: "tool"` messages, so the LLM can correlate a
     /// result with the tool call that produced it.
     pub tool_name: Option<String>,
+    /// Base64-encoded images attached to this message (e.g. a screenshot
+    /// returned by a computer-use tool), so a vision-capable model can see
+    /// them. Empty for ordinary text-only messages.
+    pub images: Vec<String>,
 }
 
 pub trait Llm {

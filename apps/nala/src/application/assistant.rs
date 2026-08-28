@@ -3,9 +3,16 @@ use std::time::Instant;
 use crate::application::tools::registry::ToolRegistry;
 use crate::ports::events::{Event, EventSink};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
-use crate::ports::tool_dispatcher::ToolDispatcher;
+use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
-pub const MAX_TOOL_CALLS: usize = 10;
+pub const MAX_TOOL_CALLS: usize = 30;
+
+/// How many times in a row the exact same tool call (name + arguments) can
+/// be requested before the turn is aborted as a loop. Multi-step flows
+/// (screenshot, click, screenshot again) legitimately call the same tool
+/// repeatedly with different arguments — only an identical call repeated
+/// back-to-back indicates the model is stuck.
+pub const MAX_IDENTICAL_REPEATS: usize = 3;
 
 /// Caps how many messages `self.messages` keeps, so a long-running session
 /// doesn't grow the prompt (and its token cost) without bound. The system
@@ -24,7 +31,15 @@ When the task is completed, briefly tell the user what was done in natural langu
 
 Always use the provided computer context when generating commands.
 
-Do not guess usernames, paths, directories, operating systems, or shells.";
+Do not guess usernames, paths, directories, operating systems, or shells.
+
+When you have tools to see and control the screen (e.g. screenshot, click, type, key), completing a task is a multi-step loop, not a single call:
+1. Take a screenshot before acting, to see the current state of the screen.
+2. Describe what you see and decide the next single action.
+3. Perform that one action (click, type, key, scroll).
+4. Take another screenshot to verify the action had the expected effect before continuing.
+5. Repeat until the task is done, then answer in natural language.
+Give click coordinates as absolute pixel positions based on the most recent screenshot. After opening an application, wait for it to load before interacting with it.";
 
 pub struct Assistant<L, D, E> {
     llm: L,
@@ -44,7 +59,9 @@ where
     Llm(#[source] L),
     #[error("tool error: {0}")]
     Tool(#[source] D),
-    #[error("loop detected: the same tool call was requested twice in a row")]
+    #[error(
+        "loop detected: the same tool call was requested {MAX_IDENTICAL_REPEATS} times in a row"
+    )]
     LoopDetected,
     #[error("tool call limit exceeded")]
     ToolCallLimitExceeded,
@@ -53,7 +70,7 @@ where
 impl<L, D, E> Assistant<L, D, E>
 where
     L: Llm,
-    D: ToolDispatcher<Output = String>,
+    D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
     E: EventSink,
 {
@@ -81,10 +98,7 @@ where
             .map(|message| message.content.as_str())
     }
 
-    pub fn process(
-        &mut self,
-        input: &str,
-    ) -> Result<D::Output, AssistantError<LlmError, D::Error>> {
+    pub fn process(&mut self, input: &str) -> Result<String, AssistantError<LlmError, D::Error>> {
         let request_start = Instant::now();
 
         self.events.emit(Event::RequestStarted);
@@ -94,9 +108,8 @@ where
         let mut messages = self.build_prompt_messages()?;
         let tools = self.registry.definitions();
 
-        let mut executed_tools: Vec<ToolCall> = Vec::new();
-        let mut succeeded_tools: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut last_tool_call: Option<ToolCall> = None;
+        let mut identical_repeats: usize = 0;
         let mut tool_call_count: usize = 0;
 
         loop {
@@ -127,23 +140,14 @@ where
                 LlmResponse::ToolCall(tool_call) => {
                     messages.push(assistant_tool_call_message(tool_call.clone()));
 
-                    // A tool that already succeeded this turn is done; a
-                    // retry (even with different arguments) means the model
-                    // didn't recognize the task was already resolved. Since
-                    // we already have a usable result, answer with it
-                    // instead of failing the whole request.
-                    if let Some(output) = succeeded_tools.get(&tool_call.name) {
-                        let text = output.clone();
-                        self.push_history(assistant_text_message(text.clone()));
-
-                        let duration = request_start.elapsed();
-
-                        self.events.emit(Event::RequestCompleted { duration });
-
-                        return Ok(text);
+                    if last_tool_call.as_ref() == Some(&tool_call) {
+                        identical_repeats += 1;
+                    } else {
+                        identical_repeats = 1;
+                        last_tool_call = Some(tool_call.clone());
                     }
 
-                    if executed_tools.contains(&tool_call) {
+                    if identical_repeats >= MAX_IDENTICAL_REPEATS {
                         let duration = request_start.elapsed();
 
                         self.events.emit(Event::RequestFailed {
@@ -153,7 +157,6 @@ where
 
                         return Err(AssistantError::LoopDetected);
                     }
-                    executed_tools.push(tool_call.clone());
                     tool_call_count += 1;
 
                     let tool_name = tool_call.name.clone();
@@ -166,21 +169,17 @@ where
 
                     let start = Instant::now();
 
-                    let output = handle_tool_call(&mut self.dispatcher, tool_call);
+                    let outcome = handle_tool_call(&mut self.dispatcher, tool_call);
 
                     let duration = start.elapsed();
-
-                    if !output.starts_with("ERROR:") {
-                        succeeded_tools.insert(tool_name.clone(), output.clone());
-                    }
 
                     self.events.emit(Event::ToolCompleted {
                         name: tool_name.clone(),
                         duration,
-                        output: output.clone(),
+                        output: outcome.text.clone(),
                     });
 
-                    messages.push(tool_result_message(tool_name, output));
+                    messages.push(tool_result_message(tool_name, outcome));
 
                     if tool_call_count >= MAX_TOOL_CALLS {
                         let duration = request_start.elapsed();
@@ -235,14 +234,14 @@ where
     }
 }
 
-fn handle_tool_call<D>(dispatcher: &mut D, tool_call: ToolCall) -> String
+fn handle_tool_call<D>(dispatcher: &mut D, tool_call: ToolCall) -> ToolOutcome
 where
-    D: ToolDispatcher<Output = String>,
+    D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
 {
     match dispatcher.dispatch(tool_call) {
-        Ok(output) => output,
-        Err(error) => format!("ERROR: {error}"),
+        Ok(outcome) => outcome,
+        Err(error) => ToolOutcome::from(format!("ERROR: {error}")),
     }
 }
 
@@ -252,6 +251,7 @@ fn system_message(content: String) -> Message {
         content,
         tool_calls: None,
         tool_name: None,
+        images: Vec::new(),
     }
 }
 
@@ -261,6 +261,7 @@ fn user_message(content: &str) -> Message {
         content: content.to_string(),
         tool_calls: None,
         tool_name: None,
+        images: Vec::new(),
     }
 }
 
@@ -270,6 +271,7 @@ fn assistant_text_message(content: String) -> Message {
         content,
         tool_calls: None,
         tool_name: None,
+        images: Vec::new(),
     }
 }
 
@@ -279,14 +281,16 @@ fn assistant_tool_call_message(tool_call: ToolCall) -> Message {
         content: String::new(),
         tool_calls: Some(vec![tool_call]),
         tool_name: None,
+        images: Vec::new(),
     }
 }
 
-fn tool_result_message(tool_name: String, content: String) -> Message {
+fn tool_result_message(tool_name: String, outcome: ToolOutcome) -> Message {
     Message {
         role: "tool".to_string(),
-        content,
+        content: outcome.text,
         tool_calls: None,
         tool_name: Some(tool_name),
+        images: outcome.images,
     }
 }

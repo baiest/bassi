@@ -4,6 +4,9 @@ mod fake_computer;
 #[path = "common/fake_llm.rs"]
 mod fake_llm;
 
+#[path = "common/fake_mcp.rs"]
+mod fake_mcp;
+
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
 
@@ -15,6 +18,9 @@ mod ping;
 
 #[path = "application/tools/dispatcher.rs"]
 mod dispatcher;
+
+#[path = "application/tools/computer_use.rs"]
+mod computer_use;
 
 #[path = "application/assistant.rs"]
 mod assistant;

@@ -9,6 +9,7 @@ fn user_message(content: &str) -> Message {
         content: content.to_string(),
         tool_calls: None,
         tool_name: None,
+        images: Vec::new(),
     }
 }
 
@@ -107,6 +108,7 @@ fn sends_tool_name_for_tool_result_messages() {
         content: "chrome opened".to_string(),
         tool_calls: None,
         tool_name: Some("execute_command".to_string()),
+        images: Vec::new(),
     };
 
     let result = llm.generate(&[tool_message], &[]);
@@ -115,6 +117,40 @@ fn sends_tool_name_for_tool_result_messages() {
 
     let request_body = stub.received_body();
     assert!(request_body.contains(r#""tool_name":"execute_command""#));
+}
+
+#[test]
+fn sends_images_when_the_message_carries_them() {
+    let stub = HttpStub::start(200, r#"{"message":{"content":"hi","tool_calls":null}}"#);
+    let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
+
+    let tool_message = Message {
+        role: "tool".to_string(),
+        content: "here is the screen".to_string(),
+        tool_calls: None,
+        tool_name: Some("screenshot".to_string()),
+        images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+    };
+
+    let result = llm.generate(&[tool_message], &[]);
+
+    assert!(result.is_ok());
+
+    let request_body = stub.received_body();
+    assert!(request_body.contains(r#""images":["YmFzZTY0ZGF0YQ=="]"#));
+}
+
+#[test]
+fn omits_the_images_field_when_the_message_has_none() {
+    let stub = HttpStub::start(200, r#"{"message":{"content":"hi","tool_calls":null}}"#);
+    let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
+
+    let result = llm.generate(&[user_message("hello")], &[]);
+
+    assert!(result.is_ok());
+
+    let request_body = stub.received_body();
+    assert!(!request_body.contains(r#""images""#));
 }
 
 /// Exercises the adapter against a real, locally running Ollama server.
