@@ -41,7 +41,15 @@ When you have tools to see and control the screen (e.g. screenshot, click, type,
 5. Repeat until the task is done, then answer in natural language.
 Give click coordinates as absolute pixel positions based on the most recent screenshot. After opening an application, wait for it to load before interacting with it.
 
-Opening a search results page is not the same as completing the request. If the user asked for a specific item (e.g. \"play this video\", \"open this file\"), you must look at the screen, pick the actual matching result, and act on it (click, open, play) before the task is done — do not stop at the search step.";
+Opening a search results page is not the same as completing the request. If the user asked for a specific item (e.g. \"play this video\", \"open this file\"), you must look at the screen, pick the actual matching result, and act on it (click, open, play) before the task is done — do not stop at the search step.
+
+Example — user asks \"play a stand-up comedy video on youtube\":
+1. execute_command: open the browser at youtube.com's search for \"stand up comedy\".
+2. screenshot: see the search results page.
+3. Look at the screenshot, pick one result's thumbnail/title, and left_click its exact coordinates.
+4. screenshot: confirm the video is now playing (not still on the results list).
+5. Only now answer the user in natural language, naming the video you played.
+If step 4's screenshot still shows the results list, click failed or missed — screenshot again, re-read the coordinates, and retry the click. Never end the turn on step 1 or 2.";
 
 pub struct Assistant<L, D, E> {
     llm: L,
