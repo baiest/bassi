@@ -12,3 +12,6 @@ mod computer;
 
 #[path = "adapters/llm/ollama.rs"]
 mod ollama;
+
+#[path = "adapters/events/console.rs"]
+mod console;

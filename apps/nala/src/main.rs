@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::environment::system::SystemEnvironment;
+use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::application::assistant::Assistant;
@@ -31,12 +32,14 @@ fn main() {
     let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "qwen3.5:2b")
         .expect("Failed to create Ollama client");
 
-    let mut assistant = Assistant::new(llm, dispatcher, registry);
+    let events = ConsoleEventSink;
+
+    let mut assistant = Assistant::new(llm, dispatcher, registry, events);
 
     let mut input = String::new();
     loop {
         println!("Hola, en que te puedo ayudar?");
-        print!(">");
+        print!("> ");
 
         io::stdout().flush().expect("Error cleaning buffer");
 
@@ -44,16 +47,9 @@ fn main() {
             .read_line(&mut input)
             .expect("Failed reading line");
 
-        println!("Procesando tu petición...");
-        let result = assistant.process(input.trim());
-
-        match result {
-            Ok(_) => {
-                println!("Respuesta recibida con éxito.");
-            }
-            Err(e) => {
-                eprintln!("Error: No se pudo procesar la petición. Detalles: {e}");
-            }
+        match assistant.process(input.trim()) {
+            Ok(response) => println!("{response}"),
+            Err(e) => eprintln!("Error: {e}"),
         }
 
         input.clear();
