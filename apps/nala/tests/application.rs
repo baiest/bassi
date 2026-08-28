@@ -10,6 +10,9 @@ mod execute_command;
 #[path = "application/tools/registry.rs"]
 mod registry;
 
+#[path = "application/tools/ping.rs"]
+mod ping;
+
 #[path = "application/tools/dispatcher.rs"]
 mod dispatcher;
 

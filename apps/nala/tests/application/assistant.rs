@@ -1,7 +1,9 @@
 use nala::application::{
     assistant::{Assistant, AssistantError},
     tools::{
-        Tool, dispatcher::ToolDispatcher, execute_command::ExecuteCommandTool,
+        Tool,
+        dispatcher::{ToolDispatcher, Tools},
+        execute_command::ExecuteCommandTool,
         registry::ToolRegistry,
     },
 };
@@ -19,17 +21,14 @@ fn registry() -> ToolRegistry {
     registry
 }
 
-fn assistant_with<L>(
-    llm: L,
-    computer: FakeComputer,
-) -> Assistant<L, ToolDispatcher<ExecuteCommandTool<FakeComputer>>>
+fn assistant_with<L>(llm: L, computer: FakeComputer) -> Assistant<L, ToolDispatcher<FakeComputer>>
 where
     L: nala::ports::llm::Llm,
 {
     let tool = ExecuteCommandTool::new(computer);
 
     let mut dispatcher = ToolDispatcher::new();
-    dispatcher.register(tool);
+    dispatcher.register(Tools::ExecuteCommand(tool));
 
     Assistant::new(llm, dispatcher, registry())
 }

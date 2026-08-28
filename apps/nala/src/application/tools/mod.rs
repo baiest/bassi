@@ -1,5 +1,6 @@
 pub mod dispatcher;
 pub mod execute_command;
+pub mod ping;
 pub mod registry;
 
 pub struct ToolDefinition {
