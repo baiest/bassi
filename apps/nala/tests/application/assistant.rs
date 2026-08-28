@@ -125,7 +125,7 @@ fn resolves_simple_request_in_a_single_tool_call() {
 }
 
 #[test]
-fn does_not_call_the_same_tool_again_after_success() {
+fn answers_with_the_prior_result_instead_of_calling_the_same_tool_again_after_success() {
     let mut assistant = assistant_with(
         RetriesSameToolWithDifferentArgsLlm::new(),
         FakeComputer::new(),
@@ -133,12 +133,15 @@ fn does_not_call_the_same_tool_again_after_success() {
 
     let result = assistant.process("what time is it?");
 
-    assert!(matches!(result, Err(AssistantError::LoopDetected)));
+    assert_eq!(result.unwrap(), "SUCCESS: command completed with no output");
 }
 
 #[test]
-fn returns_loop_detected_on_repeated_tool_call() {
-    let mut assistant = assistant_with(RepeatsSameToolCallLlm::new(), FakeComputer::new());
+fn returns_loop_detected_on_repeated_failing_tool_call() {
+    let mut computer = FakeComputer::new();
+    computer.should_fail = true;
+
+    let mut assistant = assistant_with(RepeatsSameToolCallLlm::new(), computer);
 
     let result = assistant.process("open chrome");
 
