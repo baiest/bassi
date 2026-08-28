@@ -19,8 +19,23 @@ pub struct ChildTransport {
 
 impl ChildTransport {
     pub fn spawn(program: &str, args: &[&str]) -> std::io::Result<Self> {
-        let mut child = Command::new(program)
-            .args(args)
+        // On Windows, package-manager shims like `npx` are `.cmd` batch
+        // files, not real executables — `CreateProcess` (what
+        // `std::process::Command` calls under the hood) can't launch those
+        // directly, only `cmd.exe` can. Routing through `cmd /C` mirrors
+        // what `adapters/computer/windows.rs` already does for shell
+        // commands, and still works for a real .exe.
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.arg("/C").arg(program).args(args);
+            command
+        } else {
+            let mut command = Command::new(program);
+            command.args(args);
+            command
+        };
+
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
