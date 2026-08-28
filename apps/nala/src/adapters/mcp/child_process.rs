@@ -15,6 +15,11 @@ pub struct ChildTransport {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// Kept alive only to be dropped (and so kill the whole process group)
+    /// after `child` on `ChildTransport::drop`. See `job_object`'s docs for
+    /// why `child.kill()` alone isn't enough on Windows.
+    #[cfg(windows)]
+    _job: Option<crate::adapters::mcp::job_object::ProcessGroup>,
 }
 
 impl ChildTransport {
@@ -35,11 +40,23 @@ impl ChildTransport {
             command
         };
 
+        // Created before spawning so the child can be assigned to it right
+        // away, before it has a chance to spawn its own children.
+        #[cfg(windows)]
+        let job = crate::adapters::mcp::job_object::ProcessGroup::new().ok();
+
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
+
+        #[cfg(windows)]
+        if let Some(job) = &job {
+            // Best-effort: if this fails, cleanup falls back to killing
+            // just the direct child, same as before this existed.
+            let _ = job.assign(&child);
+        }
 
         let stdin = child
             .stdin
@@ -54,6 +71,8 @@ impl ChildTransport {
             child,
             stdin,
             stdout: BufReader::new(stdout),
+            #[cfg(windows)]
+            _job: job,
         })
     }
 }
