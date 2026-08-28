@@ -1,5 +1,5 @@
-use nala::application::tools::ToolDefinition;
 use nala::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
+use nala::ports::tool::ToolDefinition;
 
 #[derive(Default)]
 pub struct FakeLlm {
