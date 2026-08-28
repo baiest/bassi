@@ -102,6 +102,9 @@ mod wire {
 
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
+
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        images: Vec<String>,
     }
 
     #[derive(Serialize)]
@@ -160,6 +163,7 @@ mod wire {
                 role: message.role.clone(),
                 content: message.content.clone(),
                 tool_name: message.tool_name.clone(),
+                images: message.images.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|calls| {
                     calls
                         .iter()

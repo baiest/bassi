@@ -1,3 +1,4 @@
+pub mod computer_use;
 pub mod dispatcher;
 pub mod execute_command;
 pub mod ping;

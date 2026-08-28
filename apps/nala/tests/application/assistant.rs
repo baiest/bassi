@@ -14,7 +14,8 @@ use nala::{
 use crate::{
     fake_computer::FakeComputer,
     fake_llm::{
-        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, EchoesLastMessageLlm, FailingLlm, FakeLlm,
+        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, ChainsDistinctToolCallsThenAnswersLlm,
+        EchoesLastMessageLlm, FailingLlm, FakeLlm, RepeatsSameCallTwiceThenAnswersLlm,
         RepeatsSameToolCallLlm, ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
     },
 };
@@ -125,7 +126,11 @@ fn resolves_simple_request_in_a_single_tool_call() {
 }
 
 #[test]
-fn answers_with_the_prior_result_instead_of_calling_the_same_tool_again_after_success() {
+fn stops_after_reaching_max_tool_calls_when_the_llm_keeps_varying_the_arguments() {
+    // A tool succeeding doesn't end the turn by itself: the model has to
+    // recognize the task is done and answer with text. If it keeps calling
+    // the same tool with different arguments forever, the turn still has to
+    // end via the tool-call limit, not a stale "already succeeded" shortcut.
     let mut assistant = assistant_with(
         RetriesSameToolWithDifferentArgsLlm::new(),
         FakeComputer::new(),
@@ -133,7 +138,34 @@ fn answers_with_the_prior_result_instead_of_calling_the_same_tool_again_after_su
 
     let result = assistant.process("what time is it?");
 
-    assert_eq!(result.unwrap(), "SUCCESS: command completed with no output");
+    assert!(matches!(result, Err(AssistantError::ToolCallLimitExceeded)));
+}
+
+#[test]
+fn chains_distinct_tool_calls_before_answering() {
+    // A real computer-use flow looks like screenshot -> click -> screenshot:
+    // several distinct calls to the same tool name, none of them identical,
+    // followed by a text answer. None of this should be mistaken for a loop.
+    let mut assistant = assistant_with(
+        ChainsDistinctToolCallsThenAnswersLlm::new(),
+        FakeComputer::new(),
+    );
+
+    let result = assistant.process("do a multi-step task");
+
+    assert_eq!(result.unwrap(), "done");
+}
+
+#[test]
+fn tolerates_the_same_tool_call_repeated_below_the_loop_threshold() {
+    let mut assistant = assistant_with(
+        RepeatsSameCallTwiceThenAnswersLlm::new(),
+        FakeComputer::new(),
+    );
+
+    let result = assistant.process("what time is it?");
+
+    assert_eq!(result.unwrap(), "done");
 }
 
 #[test]
