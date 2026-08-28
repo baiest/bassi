@@ -15,7 +15,7 @@ use crate::{
     fake_computer::FakeComputer,
     fake_llm::{
         AlwaysCallsToolLlm, AlwaysRepliesTextLlm, EchoesLastMessageLlm, FailingLlm, FakeLlm,
-        RepeatsSameToolCallLlm,
+        RepeatsSameToolCallLlm, ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
     },
 };
 
@@ -113,6 +113,27 @@ fn feeds_tool_error_back_to_llm() {
         text.starts_with("ERROR:"),
         "expected an error message, got {text:?}"
     );
+}
+
+#[test]
+fn resolves_simple_request_in_a_single_tool_call() {
+    let mut assistant = assistant_with(ResolvesInOneToolCallLlm::new(), FakeComputer::new());
+
+    let result = assistant.process("what time is it?");
+
+    assert_eq!(result.unwrap(), "it's 10:00 AM");
+}
+
+#[test]
+fn does_not_call_the_same_tool_again_after_success() {
+    let mut assistant = assistant_with(
+        RetriesSameToolWithDifferentArgsLlm::new(),
+        FakeComputer::new(),
+    );
+
+    let result = assistant.process("what time is it?");
+
+    assert!(matches!(result, Err(AssistantError::LoopDetected)));
 }
 
 #[test]

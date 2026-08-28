@@ -8,6 +8,7 @@ fn user_message(content: &str) -> Message {
         role: "user".to_string(),
         content: content.to_string(),
         tool_calls: None,
+        tool_name: None,
     }
 }
 
@@ -94,6 +95,26 @@ fn fails_on_malformed_json() {
     let result = llm.generate(&[], &[]);
 
     assert!(matches!(result, Err(LlmError::InvalidResponse(_))));
+}
+
+#[test]
+fn sends_tool_name_for_tool_result_messages() {
+    let stub = HttpStub::start(200, r#"{"message":{"content":"hi","tool_calls":null}}"#);
+    let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
+
+    let tool_message = Message {
+        role: "tool".to_string(),
+        content: "chrome opened".to_string(),
+        tool_calls: None,
+        tool_name: Some("execute_command".to_string()),
+    };
+
+    let result = llm.generate(&[tool_message], &[]);
+
+    assert!(result.is_ok());
+
+    let request_body = stub.received_body();
+    assert!(request_body.contains(r#""tool_name":"execute_command""#));
 }
 
 /// Exercises the adapter against a real, locally running Ollama server.
