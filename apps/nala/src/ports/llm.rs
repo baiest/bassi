@@ -27,6 +27,9 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub tool_calls: Option<Vec<ToolCall>>,
+    /// Set only on `role: "tool"` messages, so the LLM can correlate a
+    /// result with the tool call that produced it.
+    pub tool_name: Option<String>,
 }
 
 pub trait Llm {

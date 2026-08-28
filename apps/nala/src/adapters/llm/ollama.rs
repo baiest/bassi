@@ -99,6 +99,9 @@ mod wire {
 
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<OllamaToolCall>>,
+
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
     }
 
     #[derive(Serialize)]
@@ -156,6 +159,7 @@ mod wire {
             .map(|message| OllamaMessage {
                 role: message.role.clone(),
                 content: message.content.clone(),
+                tool_name: message.tool_name.clone(),
                 tool_calls: message.tool_calls.as_ref().map(|calls| {
                     calls
                         .iter()
