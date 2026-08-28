@@ -2,20 +2,25 @@ use std::fmt;
 
 use crate::ports::{
     computer::{Computer, ComputerContext, ComputerError},
+    environment::Environment,
     process::Process,
 };
 
-pub struct Windows<P> {
+pub struct Windows<P, E> {
     process: P,
+    environment: E,
 }
 
-impl<P> Windows<P> {
-    pub fn new(process: P) -> Self {
-        Self { process }
+impl<P, E> Windows<P, E> {
+    pub fn new(process: P, environment: E) -> Self {
+        Self {
+            process,
+            environment,
+        }
     }
 }
 
-impl<P: Process> Computer for Windows<P> {
+impl<P: Process, E: Environment> Computer for Windows<P, E> {
     type Process = P;
 
     const SYSTEM_DESCRIPTION: &'static str = "This is a Windows computer.";
@@ -27,18 +32,10 @@ impl<P: Process> Computer for Windows<P> {
     }
 
     fn get_context(&mut self) -> Result<ComputerContext, ComputerError> {
-        let username = std::env::var("USERNAME")
-            .map_err(|error| ComputerError::CommandFailed(error.to_string()))?;
-
-        let home_dir = std::env::var("USERPROFILE")
-            .map_err(|error| ComputerError::CommandFailed(error.to_string()))?;
-
+        let username = self.environment.var("USERNAME")?;
+        let home_dir = self.environment.var("USERPROFILE")?;
         let desktop_dir = format!(r"{home_dir}\Desktop");
-
-        let current_dir = std::env::current_dir()
-            .map_err(|error| ComputerError::CommandFailed(error.to_string()))?
-            .to_string_lossy()
-            .to_string();
+        let current_dir = self.environment.current_dir()?;
 
         Ok(ComputerContext {
             system: Self::SYSTEM_DESCRIPTION.to_string(),

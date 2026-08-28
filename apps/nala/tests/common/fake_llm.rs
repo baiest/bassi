@@ -114,6 +114,27 @@ impl Llm for EchoesLastMessageLlm {
     }
 }
 
+/// Always replies with text immediately, never requesting a tool call. Used
+/// to run many turns in a row without tripping the tool-call machinery.
+#[derive(Default)]
+pub struct AlwaysRepliesTextLlm;
+
+impl AlwaysRepliesTextLlm {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for AlwaysRepliesTextLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        Ok(LlmResponse::Text("ok".to_string()))
+    }
+}
+
 #[derive(Default)]
 pub struct RepeatsSameToolCallLlm;
 
