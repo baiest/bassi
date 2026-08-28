@@ -29,7 +29,7 @@ fn can_register_multiple_tools() {
     let execute_command = ExecuteCommandTool::<FakeComputer>::definition();
 
     let another_tool = ToolDefinition {
-        name: "another_tool",
+        name: "another_tool".to_string(),
         description: "another".to_string(),
         parameters: serde_json::json!({}),
     };
@@ -43,4 +43,21 @@ fn can_register_multiple_tools() {
     );
 
     assert_eq!(registry.get("another_tool").unwrap().name, "another_tool");
+}
+
+#[test]
+fn can_register_a_tool_with_a_runtime_discovered_name() {
+    let mut registry = ToolRegistry::new();
+
+    // MCP tools are discovered via `tools/list` at runtime, so their name
+    // is a `String`, not a `&'static str` known at compile time.
+    let discovered_name = String::from("screenshot");
+
+    registry.register(ToolDefinition {
+        name: discovered_name.clone(),
+        description: "Take a screenshot".to_string(),
+        parameters: serde_json::json!({}),
+    });
+
+    assert_eq!(registry.get(&discovered_name).unwrap().name, "screenshot");
 }

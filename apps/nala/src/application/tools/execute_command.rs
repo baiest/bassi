@@ -52,7 +52,7 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
 
     fn definition() -> ToolDefinition {
         ToolDefinition {
-            name: Self::NAME,
+            name: Self::NAME.to_string(),
             description: format!(
                 "{} {}",
                 C::SYSTEM_DESCRIPTION,

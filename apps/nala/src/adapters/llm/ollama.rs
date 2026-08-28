@@ -182,7 +182,7 @@ mod wire {
             .map(|tool| ChatTool {
                 r#type: "function",
                 function: FunctionDefinition {
-                    name: tool.name,
+                    name: &tool.name,
                     description: &tool.description,
                     parameters: tool.parameters.clone(),
                 },
