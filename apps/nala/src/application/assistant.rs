@@ -4,6 +4,11 @@ use crate::ports::tool_dispatcher::ToolDispatcher;
 
 pub const MAX_TOOL_CALLS: usize = 10;
 
+/// Caps how many messages `self.messages` keeps, so a long-running session
+/// doesn't grow the prompt (and its token cost) without bound. The system
+/// prompt at index 0 is never counted against this limit or pruned.
+pub const MAX_HISTORY_MESSAGES: usize = 20;
+
 const SYSTEM_PROMPT: &str = "You are Nala, a computer assistant.
 
 When the user asks you to perform an action, use the available tools.
@@ -56,11 +61,25 @@ where
         }
     }
 
+    /// Number of persisted messages, including the system prompt.
+    pub fn message_count(&self) -> usize {
+        self.messages.len()
+    }
+
+    /// The system prompt's content, if the (always-first) message is still
+    /// the system prompt.
+    pub fn system_prompt(&self) -> Option<&str> {
+        self.messages
+            .first()
+            .filter(|message| message.role == "system")
+            .map(|message| message.content.as_str())
+    }
+
     pub fn process(
         &mut self,
         input: &str,
     ) -> Result<D::Output, AssistantError<LlmError, D::Error>> {
-        self.messages.push(user_message(input));
+        self.push_history(user_message(input));
 
         let mut messages = self.build_prompt_messages()?;
         let tools = self.registry.definitions();
@@ -92,7 +111,7 @@ where
                     }
                 }
                 LlmResponse::Text(text) => {
-                    self.messages.push(assistant_text_message(text.clone()));
+                    self.push_history(assistant_text_message(text.clone()));
 
                     break Ok(text);
                 }
@@ -116,6 +135,16 @@ where
         )));
 
         Ok(messages)
+    }
+
+    /// Appends to the persisted history, then drops the oldest non-system
+    /// messages until it's back within `MAX_HISTORY_MESSAGES`.
+    fn push_history(&mut self, message: Message) {
+        self.messages.push(message);
+
+        while self.messages.len() > MAX_HISTORY_MESSAGES {
+            self.messages.remove(1);
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::ports::environment::EnvironmentError;
 use crate::ports::process::Process;
 
 #[derive(Debug)]
@@ -13,6 +14,8 @@ pub struct ComputerContext {
 pub enum ComputerError {
     #[error("command failed: {0}")]
     CommandFailed(String),
+    #[error("environment error: {0}")]
+    Environment(#[from] EnvironmentError),
 }
 
 pub trait Computer {

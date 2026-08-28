@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use nala::adapters::computer::windows::Windows;
+use nala::adapters::environment::system::SystemEnvironment;
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::application::assistant::Assistant;
@@ -12,11 +13,14 @@ use nala::application::tools::registry::ToolRegistry;
 
 fn main() {
     let process = WindowsProcess::new();
+    let environment = SystemEnvironment::new();
 
-    let computer = Windows::new(process);
+    let computer = Windows::new(process, environment);
 
     let mut registry = ToolRegistry::new();
-    registry.register(ExecuteCommandTool::<Windows<WindowsProcess>>::definition());
+    registry.register(ExecuteCommandTool::<
+        Windows<WindowsProcess, SystemEnvironment>,
+    >::definition());
     registry.register(PingTool::definition());
 
     let mut dispatcher = ToolDispatcher::new();

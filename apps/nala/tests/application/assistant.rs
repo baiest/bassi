@@ -1,5 +1,5 @@
 use nala::application::{
-    assistant::{Assistant, AssistantError},
+    assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
     tools::{
         Tool,
         dispatcher::{ToolDispatcher, Tools},
@@ -11,7 +11,8 @@ use nala::application::{
 use crate::{
     fake_computer::FakeComputer,
     fake_llm::{
-        AlwaysCallsToolLlm, EchoesLastMessageLlm, FailingLlm, FakeLlm, RepeatsSameToolCallLlm,
+        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, EchoesLastMessageLlm, FailingLlm, FakeLlm,
+        RepeatsSameToolCallLlm,
     },
 };
 
@@ -127,4 +128,21 @@ fn keeps_conversation_history_across_process_calls() {
     // a second `process` call still resolves without needing new tool calls.
     let second = assistant.process("thanks");
     assert!(second.is_ok());
+}
+
+#[test]
+fn keeps_only_the_last_messages_in_history() {
+    let mut assistant = assistant_with(AlwaysRepliesTextLlm::new(), FakeComputer::new());
+
+    for turn in 0..(MAX_HISTORY_MESSAGES + 10) {
+        assistant
+            .process(&format!("turn {turn}"))
+            .expect("turn should succeed");
+    }
+
+    assert!(assistant.message_count() <= MAX_HISTORY_MESSAGES);
+    let system_prompt = assistant
+        .system_prompt()
+        .expect("system prompt should survive pruning");
+    assert!(system_prompt.starts_with("You are Nala, a computer assistant."));
 }
