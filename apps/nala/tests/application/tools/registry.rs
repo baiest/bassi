@@ -30,7 +30,8 @@ fn can_register_multiple_tools() {
 
     let another_tool = ToolDefinition {
         name: "another_tool",
-        description: "another",
+        description: "another".to_string(),
+        parameters: "{}",
     };
 
     registry.register(execute_command);

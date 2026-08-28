@@ -1,6 +1,9 @@
-use crate::application::tools::Tool;
+use crate::application::tools::{Tool, ToolDefinition};
 use crate::ports::computer::{Computer, ComputerError};
+use crate::ports::process::Process;
+use serde::Deserialize;
 
+#[derive(Deserialize)]
 pub struct ExecuteCommandArgs {
     pub command: String,
 }
@@ -17,13 +20,49 @@ impl<C: Computer> ExecuteCommandTool<C> {
 
 impl<C: Computer> Tool for ExecuteCommandTool<C> {
     type Args = ExecuteCommandArgs;
-    type Output = ();
+    type Output = String;
     type Error = ComputerError;
 
     const NAME: &'static str = "execute_command";
-    const DESCRIPTION: &'static str = "Execute a command on the computer";
+    const DESCRIPTION: &'static str = "Execute a command directly on the user's computer. Generate the command required to perform the user's requested action. The command is executed by the operating system shell. Use the appropriate command and syntax for the available operating system.";
+    const PARAMETERS: &'static str = r#"{
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Execute a command directly on the user's computer. Generate the command required to perform the user's requested action. The command is executed by the operating system shell. Use the appropriate command and syntax for the available operating system."
+                }
+            },
+            "required": ["command"]
+        }"#;
 
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.computer.execute_command(&args.command)
+        let output = self.computer.execute_command(&args.command)?;
+
+        if output.trim().is_empty() {
+            Ok("SUCCESS: command completed with no output".to_string())
+        } else {
+            Ok(format!("SUCCESS: {output}"))
+        }
+    }
+
+    fn parse_arguments(args: &str) -> Result<Self::Args, Self::Error> {
+        serde_json::from_str(args).map_err(|error| ComputerError::CommandFailed(error.to_string()))
+    }
+
+    fn definition() -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME,
+            description: format!(
+                "{} {}",
+                C::SYSTEM_DESCRIPTION,
+                <C::Process as Process>::SYSTEM_DESCRIPTION,
+            ),
+            parameters: Self::PARAMETERS,
+        }
+    }
+
+    fn context(&mut self) -> Result<String, Self::Error> {
+        Ok(self.computer.get_context()?.to_string())
     }
 }
