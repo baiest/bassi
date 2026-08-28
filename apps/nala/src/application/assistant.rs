@@ -39,7 +39,9 @@ When you have tools to see and control the screen (e.g. screenshot, click, type,
 3. Perform that one action (click, type, key, scroll).
 4. Take another screenshot to verify the action had the expected effect before continuing.
 5. Repeat until the task is done, then answer in natural language.
-Give click coordinates as absolute pixel positions based on the most recent screenshot. After opening an application, wait for it to load before interacting with it.";
+Give click coordinates as absolute pixel positions based on the most recent screenshot. After opening an application, wait for it to load before interacting with it.
+
+Opening a search results page is not the same as completing the request. If the user asked for a specific item (e.g. \"play this video\", \"open this file\"), you must look at the screen, pick the actual matching result, and act on it (click, open, play) before the task is done — do not stop at the search step.";
 
 pub struct Assistant<L, D, E> {
     llm: L,
