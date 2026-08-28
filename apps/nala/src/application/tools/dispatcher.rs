@@ -1,89 +1,87 @@
 use crate::{
-    application::tools::Tool,
-    ports::{llm::ToolCall, tool_dispatcher::ToolDispatcher as ToolDispatcherPort},
+    application::tools::{Tool, execute_command::ExecuteCommandTool, ping::PingTool},
+    ports::{
+        computer::Computer, llm::ToolCall, tool_dispatcher::ToolDispatcher as ToolDispatcherPort,
+    },
 };
 
 #[derive(Debug)]
-pub enum ToolDispatcherError<E> {
+pub enum ToolDispatcherError {
     ToolNotFound,
-    ToolErrorParsingArguments(E),
-    ToolExecuteError(E),
+    ToolErrorParsingArguments(String),
+    ToolExecuteError(String),
 }
 
-pub struct ToolDispatcher<T> {
-    tool: Option<T>,
+/// One variant per `Tool` implementation the dispatcher knows how to run.
+/// Adding a tool means adding a variant here and a match arm below — both
+/// checked exhaustively at compile time, no runtime type erasure.
+pub enum Tools<C: Computer> {
+    ExecuteCommand(ExecuteCommandTool<C>),
+    Ping(PingTool),
 }
 
-impl<T> ToolDispatcher<T> {
+pub struct ToolDispatcher<C: Computer> {
+    tools: Vec<Tools<C>>,
+}
+
+impl<C: Computer> ToolDispatcher<C> {
     pub fn new() -> Self {
-        Self { tool: None }
+        Self { tools: Vec::new() }
     }
 
-    pub fn register(&mut self, tool: T) {
-        self.tool = Some(tool);
-    }
-}
-
-impl<T> ToolDispatcher<T>
-where
-    T: Tool,
-{
-    pub fn execute(
-        &mut self,
-        name: &str,
-        args: T::Args,
-    ) -> Result<T::Output, ToolDispatcherError<T::Error>> {
-        if name != T::NAME {
-            return Err(ToolDispatcherError::ToolNotFound);
-        }
-
-        let tool = self
-            .tool
-            .as_mut()
-            .ok_or(ToolDispatcherError::ToolNotFound)?;
-
-        tool.execute(args)
-            .map_err(ToolDispatcherError::ToolExecuteError)
+    pub fn register(&mut self, tool: Tools<C>) {
+        self.tools.push(tool);
     }
 }
 
-impl<T> ToolDispatcherPort for ToolDispatcher<T>
-where
-    T: Tool,
-{
-    type Output = T::Output;
-    type Error = ToolDispatcherError<T::Error>;
+impl<C: Computer> Default for ToolDispatcher<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<C: Computer> ToolDispatcherPort for ToolDispatcher<C> {
+    type Output = String;
+    type Error = ToolDispatcherError;
 
     fn dispatch(&mut self, tool_call: ToolCall) -> Result<Self::Output, Self::Error> {
-        if tool_call.name != T::NAME {
-            return Err(ToolDispatcherError::ToolNotFound);
+        for tool in &mut self.tools {
+            match tool {
+                Tools::ExecuteCommand(tool) if tool_call.name == ExecuteCommandTool::<C>::NAME => {
+                    let args = ExecuteCommandTool::<C>::parse_arguments(&tool_call.arguments)
+                        .map_err(|error| {
+                            ToolDispatcherError::ToolErrorParsingArguments(format!("{error:?}"))
+                        })?;
+
+                    return tool.execute(args).map_err(|error| {
+                        ToolDispatcherError::ToolExecuteError(format!("{error:?}"))
+                    });
+                }
+                Tools::Ping(tool) if tool_call.name == PingTool::NAME => {
+                    PingTool::parse_arguments(&tool_call.arguments).map_err(|error| {
+                        ToolDispatcherError::ToolErrorParsingArguments(format!("{error:?}"))
+                    })?;
+
+                    return tool.execute(()).map_err(|error| {
+                        ToolDispatcherError::ToolExecuteError(format!("{error:?}"))
+                    });
+                }
+                _ => continue,
+            }
         }
 
-        let tool = self
-            .tool
-            .as_mut()
-            .ok_or(ToolDispatcherError::ToolNotFound)?;
-
-        let args = T::parse_arguments(&tool_call.arguments)
-            .map_err(ToolDispatcherError::ToolErrorParsingArguments)?;
-
-        tool.execute(args)
-            .map_err(ToolDispatcherError::ToolExecuteError)
+        Err(ToolDispatcherError::ToolNotFound)
     }
 
     fn get_context(&mut self) -> Result<String, Self::Error> {
-        let tool = self
-            .tool
-            .as_mut()
-            .ok_or(ToolDispatcherError::ToolNotFound)?;
+        for tool in &mut self.tools {
+            if let Tools::ExecuteCommand(tool) = tool {
+                return tool
+                    .context()
+                    .map_err(|error| ToolDispatcherError::ToolExecuteError(format!("{error:?}")));
+            }
+        }
 
-        tool.context()
-            .map_err(ToolDispatcherError::ToolExecuteError)
-    }
-}
-
-impl<T> Default for ToolDispatcher<T> {
-    fn default() -> Self {
-        Self::new()
+        Err(ToolDispatcherError::ToolNotFound)
     }
 }

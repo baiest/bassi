@@ -5,8 +5,9 @@ use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::application::assistant::Assistant;
 use nala::application::tools::Tool;
-use nala::application::tools::dispatcher::ToolDispatcher;
+use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
 use nala::application::tools::execute_command::ExecuteCommandTool;
+use nala::application::tools::ping::PingTool;
 use nala::application::tools::registry::ToolRegistry;
 
 fn main() {
@@ -16,12 +17,12 @@ fn main() {
 
     let mut registry = ToolRegistry::new();
     registry.register(ExecuteCommandTool::<Windows<WindowsProcess>>::definition());
-
-    let tool = ExecuteCommandTool::new(computer);
+    registry.register(PingTool::definition());
 
     let mut dispatcher = ToolDispatcher::new();
 
-    dispatcher.register(tool);
+    dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(computer)));
+    dispatcher.register(Tools::Ping(PingTool::new()));
 
     let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "qwen3.5:2b")
         .expect("Failed to create Ollama client");
