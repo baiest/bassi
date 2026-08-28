@@ -17,7 +17,8 @@ impl Default for Windows {
 }
 
 impl Process for Windows {
-    const SYSTEM_DESCRIPTION: &'static str = "This is a Windows computer. Commands are executed using Windows cmd.exe EXCLUSIVE. IMPORTANT Use Windows cmd syntax.";
+    const SYSTEM_DESCRIPTION: &'static str =
+        "Commands are executed using Windows cmd.exe EXCLUSIVE. IMPORTANT Use Windows cmd syntax.";
 
     fn spawn(&mut self, command: &str, args: &[&str]) -> Result<String, ProcessError> {
         if command.trim().is_empty() {

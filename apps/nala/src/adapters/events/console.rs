@@ -24,8 +24,15 @@ impl EventSink for ConsoleEventSink {
             Event::ToolStarted { name, arguments } => {
                 println!("[TOOL] [{name}] started with arguments: {arguments}")
             }
-            Event::ToolCompleted { name, duration } => {
-                println!("[TOOL] [{name}] completed in {:?}\n", duration)
+            Event::ToolCompleted {
+                name,
+                duration,
+                output,
+            } => {
+                println!(
+                    "[TOOL] [{name}] completed in {:?}: {:?}\n",
+                    duration, output
+                )
             }
         }
     }

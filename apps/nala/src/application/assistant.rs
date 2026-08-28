@@ -16,9 +16,9 @@ const SYSTEM_PROMPT: &str = "You are Nala, a computer assistant.
 
 When the user asks you to perform an action, use the available tools.
 
-Do not explain how the user can perform the action manually when you can perform it yourself.
+If a tool execution fails, do not repeat the exact same tool call. Use the error information to change your approach.
 
-If a tool execution fails, use the error information to decide what to do next.
+Do not explain how the user can perform the action manually when you can perform it yourself.
 
 When the task is completed, briefly tell the user what was done.
 
@@ -95,6 +95,8 @@ where
         let tools = self.registry.definitions();
 
         let mut executed_tools: Vec<ToolCall> = Vec::new();
+        let mut succeeded_tools: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut tool_call_count: usize = 0;
 
         loop {
@@ -125,7 +127,12 @@ where
                 LlmResponse::ToolCall(tool_call) => {
                     messages.push(assistant_tool_call_message(tool_call.clone()));
 
-                    if executed_tools.contains(&tool_call) {
+                    // A tool that already succeeded this turn is done; a
+                    // retry (even with different arguments) means the model
+                    // didn't recognize the task was already resolved.
+                    if executed_tools.contains(&tool_call)
+                        || succeeded_tools.contains(&tool_call.name)
+                    {
                         let duration = request_start.elapsed();
 
                         self.events.emit(Event::RequestFailed {
@@ -152,12 +159,17 @@ where
 
                     let duration = start.elapsed();
 
+                    if !output.starts_with("ERROR:") {
+                        succeeded_tools.insert(tool_name.clone());
+                    }
+
                     self.events.emit(Event::ToolCompleted {
-                        name: tool_name,
+                        name: tool_name.clone(),
                         duration,
+                        output: output.clone(),
                     });
 
-                    messages.push(tool_result_message(output));
+                    messages.push(tool_result_message(tool_name, output));
 
                     if tool_call_count >= MAX_TOOL_CALLS {
                         let duration = request_start.elapsed();
@@ -228,6 +240,7 @@ fn system_message(content: String) -> Message {
         role: "system".to_string(),
         content,
         tool_calls: None,
+        tool_name: None,
     }
 }
 
@@ -236,6 +249,7 @@ fn user_message(content: &str) -> Message {
         role: "user".to_string(),
         content: content.to_string(),
         tool_calls: None,
+        tool_name: None,
     }
 }
 
@@ -244,6 +258,7 @@ fn assistant_text_message(content: String) -> Message {
         role: "assistant".to_string(),
         content,
         tool_calls: None,
+        tool_name: None,
     }
 }
 
@@ -252,13 +267,15 @@ fn assistant_tool_call_message(tool_call: ToolCall) -> Message {
         role: "assistant".to_string(),
         content: String::new(),
         tool_calls: Some(vec![tool_call]),
+        tool_name: None,
     }
 }
 
-fn tool_result_message(content: String) -> Message {
+fn tool_result_message(tool_name: String, content: String) -> Message {
     Message {
         role: "tool".to_string(),
         content,
         tool_calls: None,
+        tool_name: Some(tool_name),
     }
 }
