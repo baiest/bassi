@@ -8,3 +8,4 @@ pub(crate) mod job_object;
 pub mod llm;
 pub mod mcp;
 pub mod process;
+pub mod token_counter;

@@ -1,12 +1,14 @@
 use std::sync::{Arc, Mutex};
 
-// `SystemClock` is an adapter, but it wraps nothing but `std::time` and
-// `std::thread::sleep` — no I/O, no state, no dependency on this process's
-// wiring — so `Assistant::new` can default to it directly instead of
-// forcing every caller to thread a clock through their own construction
-// code. Anything that needs a different clock (tests, mainly) overrides it
-// with `with_clock`.
+// `SystemClock` and `HeuristicTokenCounter` are adapters, but both wrap
+// nothing but stdlib calls / plain arithmetic — no I/O, no state, no
+// dependency on this process's wiring — so `Assistant::new` can default to
+// them directly instead of forcing every caller to thread one through
+// their own construction code. Anything that needs a different one (tests,
+// mainly) overrides it with `with_clock` / `with_token_counter`.
 use crate::adapters::clock::system::SystemClock;
+use crate::adapters::token_counter::heuristic::HeuristicTokenCounter;
+use crate::application::context_budget::ContextBudget;
 use crate::application::loop_limits::LoopLimits;
 use crate::application::tools::registry::ToolRegistry;
 use crate::application::transcript::Transcript;
@@ -14,9 +16,8 @@ use crate::ports::cancellation::{CancelSignal, NeverCancelled};
 use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
 use crate::ports::llm::{Llm, Message, ToolCall};
+use crate::ports::token_counter::TokenCounter;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
-
-pub use crate::application::transcript::MAX_HISTORY_MESSAGES;
 
 pub(crate) const SYSTEM_PROMPT: &str = "<role>
 You are Nala, a computer assistant. You control the user's real computer through tools. You do not chat about actions — you perform them.
@@ -80,6 +81,8 @@ pub struct Assistant<L, D, E> {
     pub(crate) limits: LoopLimits,
     pub(crate) clock: Box<dyn Clock>,
     pub(crate) cancel: Box<dyn CancelSignal>,
+    pub(crate) token_counter: Box<dyn TokenCounter>,
+    pub(crate) budget: ContextBudget,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -121,6 +124,8 @@ where
             limits: LoopLimits::from_env(),
             clock: Box::new(SystemClock::new()),
             cancel: Box::new(NeverCancelled),
+            token_counter: Box::new(HeuristicTokenCounter::new()),
+            budget: ContextBudget::from_env(),
         }
     }
 
@@ -136,6 +141,16 @@ where
 
     pub fn with_cancel_signal(mut self, cancel: Box<dyn CancelSignal>) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    pub fn with_token_counter(mut self, token_counter: Box<dyn TokenCounter>) -> Self {
+        self.token_counter = token_counter;
+        self
+    }
+
+    pub fn with_budget(mut self, budget: ContextBudget) -> Self {
+        self.budget = budget;
         self
     }
 

@@ -33,3 +33,6 @@ mod computer_use;
 
 #[path = "application/assistant.rs"]
 mod assistant;
+
+#[path = "application/context_budget.rs"]
+mod context_budget;

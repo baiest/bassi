@@ -380,6 +380,54 @@ impl Llm for CallsScreenshotThenAnswersLlm {
     }
 }
 
+/// Requests five `screenshot` calls in a single response, then answers with
+/// text. All five tool results (and their images) land in the turn's
+/// messages before the loop re-checks the budget, so — unlike spreading
+/// them across separate round-trips, where eviction can correct each
+/// image back down before the next one arrives — this reliably gives a
+/// small `keep_recent_images` budget more images than it allows in one
+/// shot, for eviction to actually act on.
+#[derive(Default)]
+pub struct CallsScreenshotFiveTimesThenAnswersLlm {
+    calls: u32,
+}
+
+impl CallsScreenshotFiveTimesThenAnswersLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for CallsScreenshotFiveTimesThenAnswersLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        if calls == 0 {
+            // Distinct arguments per call so this doesn't trip loop
+            // detection (identical calls repeated back to back) — a real
+            // screenshot-heavy flow wouldn't send identical requests either.
+            let tool_calls = (0..5)
+                .map(|step| ToolCall {
+                    name: "screenshot".to_string(),
+                    arguments: format!(r#"{{"step":{step}}}"#),
+                })
+                .collect();
+            Ok(LlmResponse::tool_calls(tool_calls))
+        } else {
+            Ok(LlmResponse::text("done"))
+        }
+    }
+}
+
 /// Requests the exact same tool call twice, then answers with text. Two
 /// identical repeats is below `MAX_IDENTICAL_REPEATS`, so this must
 /// resolve normally rather than triggering `LoopDetected`.

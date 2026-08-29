@@ -6,5 +6,6 @@ pub mod events;
 pub mod llm;
 pub mod mcp;
 pub mod process;
+pub mod token_counter;
 pub mod tool;
 pub mod tool_dispatcher;
