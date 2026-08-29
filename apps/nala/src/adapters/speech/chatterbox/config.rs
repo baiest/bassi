@@ -11,6 +11,9 @@ const DEFAULT_EXAGGERATION: f32 = 0.5;
 const DEFAULT_CFG_WEIGHT: f32 = 0.5;
 const DEFAULT_TEMPERATURE: f32 = 0.8;
 const DEFAULT_TIMEOUT_S: u64 = 30;
+const DEFAULT_READ_TIMEOUT_S: u64 = 60;
+const DEFAULT_STREAMING_STRATEGY: &str = "sentence";
+const DEFAULT_STREAMING_CHUNK_SIZE: u64 = 200;
 const DEFAULT_AUTOSTART: bool = true;
 // `Command::new` runs this directly (no shell), so a bare `.ps1` path
 // wouldn't launch - it has to go through `powershell.exe` explicitly.
@@ -32,6 +35,18 @@ pub struct ChatterboxConfig {
     pub cfg_weight: f32,
     pub temperature: f32,
     pub timeout: Duration,
+    /// Per-request timeout covering the whole streamed response, from the
+    /// initial connection through the last chunk. Kept separate from
+    /// `timeout` (also used as the connect/build timeout) because a
+    /// streamed answer legitimately takes much longer than a single
+    /// request-response round trip.
+    pub read_timeout: Duration,
+    /// How the server should chunk text for streaming (`sentence`,
+    /// `paragraph`, `fixed`, or `word` - see the server's streaming docs).
+    pub streaming_strategy: String,
+    /// Target characters per streaming chunk, passed straight through to
+    /// the server (accepts 50-500).
+    pub streaming_chunk_size: u32,
     pub autostart: bool,
     pub command: String,
     pub startup_timeout: Duration,
@@ -62,6 +77,18 @@ impl ChatterboxConfig {
             cfg_weight: env_f32("NALA_CHATTERBOX_CFG_WEIGHT", DEFAULT_CFG_WEIGHT),
             temperature: env_f32("NALA_CHATTERBOX_TEMPERATURE", DEFAULT_TEMPERATURE),
             timeout: Duration::from_secs(env_u64("NALA_CHATTERBOX_TIMEOUT_S", DEFAULT_TIMEOUT_S)),
+            read_timeout: Duration::from_secs(env_u64(
+                "NALA_CHATTERBOX_READ_TIMEOUT_S",
+                DEFAULT_READ_TIMEOUT_S,
+            )),
+            streaming_strategy: env_string(
+                "NALA_CHATTERBOX_STREAMING_STRATEGY",
+                DEFAULT_STREAMING_STRATEGY,
+            ),
+            streaming_chunk_size: env_u64(
+                "NALA_CHATTERBOX_CHUNK_SIZE",
+                DEFAULT_STREAMING_CHUNK_SIZE,
+            ) as u32,
             autostart: env_bool("NALA_CHATTERBOX_AUTOSTART", DEFAULT_AUTOSTART),
             command: env_string("NALA_CHATTERBOX_CMD", DEFAULT_CMD),
             startup_timeout: Duration::from_secs(env_u64(

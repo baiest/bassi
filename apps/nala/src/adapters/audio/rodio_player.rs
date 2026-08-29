@@ -1,16 +1,16 @@
-use std::io::Cursor;
 use std::sync::mpsc;
 use std::thread;
 
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::buffer::SamplesBuffer;
+use rodio::{OutputStream, OutputStreamHandle, Sink};
 
-use crate::adapters::speech::chatterbox::PlayAudio;
+use crate::adapters::speech::chatterbox::{PcmStream, PlayPcmStream};
 use crate::ports::speech::SpeechError;
 
-/// Plays WAV audio held entirely in memory, through the system's default
-/// output device. The only adapter that touches audio hardware; kept
-/// separate from TTS synthesis so a missing/broken output device never
-/// looks like a Chatterbox failure and vice versa.
+/// Plays streamed PCM audio through the system's default output device. The
+/// only adapter that touches audio hardware; kept separate from TTS
+/// synthesis so a missing/broken output device never looks like a
+/// Chatterbox failure and vice versa.
 ///
 /// `cpal::Stream` (which `rodio::OutputStream` wraps) is deliberately not
 /// `Send` on any platform, but `AsyncSpeech`'s worker thread requires its
@@ -23,7 +23,7 @@ pub struct RodioPlayer {
 }
 
 struct PlayRequest {
-    audio: Vec<u8>,
+    stream: PcmStream,
     reply: mpsc::Sender<Result<(), SpeechError>>,
 }
 
@@ -47,7 +47,7 @@ impl RodioPlayer {
             };
 
             for request in receiver {
-                let result = play_on_device(&handle, &request.audio);
+                let result = play_stream_on_device(&handle, request.stream);
                 let _ = request.reply.send(result);
             }
         });
@@ -60,13 +60,13 @@ impl RodioPlayer {
     }
 }
 
-impl PlayAudio for RodioPlayer {
-    fn play(&self, audio: &[u8]) -> Result<(), SpeechError> {
+impl PlayPcmStream for RodioPlayer {
+    fn play_stream(&self, stream: PcmStream) -> Result<(), SpeechError> {
         let (reply_tx, reply_rx) = mpsc::channel();
 
         self.sender
             .send(PlayRequest {
-                audio: audio.to_vec(),
+                stream,
                 reply: reply_tx,
             })
             .map_err(|_| SpeechError::Playback("audio output thread is gone".to_string()))?;
@@ -77,14 +77,27 @@ impl PlayAudio for RodioPlayer {
     }
 }
 
-fn play_on_device(handle: &OutputStreamHandle, audio: &[u8]) -> Result<(), SpeechError> {
-    let source = Decoder::new(Cursor::new(audio.to_vec()))
-        .map_err(|error| SpeechError::Playback(format!("could not decode audio: {error}")))?;
-
+/// Feeds chunks into a single `Sink` as they arrive, so playback starts on
+/// the first chunk and continues gaplessly as later ones are appended -
+/// rodio queues appended sources back-to-back and only falls silent if the
+/// sink actually runs dry. Blocks (on this dedicated output thread, not the
+/// caller) until every chunk has both arrived and finished playing.
+fn play_stream_on_device(
+    handle: &OutputStreamHandle,
+    stream: PcmStream,
+) -> Result<(), SpeechError> {
     let sink = Sink::try_new(handle)
         .map_err(|error| SpeechError::Playback(format!("could not open playback sink: {error}")))?;
 
-    sink.append(source);
+    for chunk in stream.chunks {
+        let samples = chunk?;
+        sink.append(SamplesBuffer::new(
+            stream.channels,
+            stream.sample_rate,
+            samples,
+        ));
+    }
+
     sink.sleep_until_end();
 
     Ok(())

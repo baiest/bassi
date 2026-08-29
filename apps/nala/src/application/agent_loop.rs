@@ -222,19 +222,16 @@ where
                     );
 
                     if let Some(speech) = &self.speech {
-                        // Speak one sentence at a time rather than the whole
-                        // answer in one `say` call: `AsyncSpeech` queues
-                        // each piece separately, so the first sentence
-                        // starts playing as soon as it's synthesized
-                        // instead of waiting for the entire answer.
-                        for sentence in crate::application::sentences::split_into_sentences(&text) {
-                            if let Err(error) = speech.say(&sentence) {
-                                self.events.emit(Event::RequestFailed {
-                                    duration: request_start.elapsed(),
-                                    error: error.to_string(),
-                                });
-                                break;
-                            }
+                        // The whole answer goes out in a single `say` call:
+                        // the Chatterbox backend streams audio back as it's
+                        // generated, so playback starts on the first chunk
+                        // rather than waiting for the full answer — sentence
+                        // splitting here would only add extra round-trips.
+                        if let Err(error) = speech.say(&text) {
+                            self.events.emit(Event::RequestFailed {
+                                duration: request_start.elapsed(),
+                                error: error.to_string(),
+                            });
                         }
                     }
 

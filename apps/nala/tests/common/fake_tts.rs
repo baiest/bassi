@@ -1,26 +1,37 @@
 use std::sync::Mutex;
+use std::sync::mpsc;
 
-use nala::adapters::speech::chatterbox::{PlayAudio, SynthesizeSpeech};
+use nala::adapters::speech::chatterbox::{PcmStream, PlayPcmStream, StreamSynthesizeSpeech};
 use nala::ports::speech::SpeechError;
 
-/// A `SynthesizeSpeech` fake that either returns canned bytes or a
-/// configured failure, and records the text it was asked to synthesize.
+/// A `StreamSynthesizeSpeech` fake that either returns a `PcmStream` made
+/// of canned chunks or a configured up-front failure, and records the text
+/// it was asked to synthesize.
 pub struct FakeSynth {
-    result: Result<Vec<u8>, SpeechError>,
+    chunks: Result<Vec<Vec<i16>>, SpeechError>,
+    sample_rate: u32,
+    channels: u16,
     received: Mutex<Vec<String>>,
 }
 
 impl FakeSynth {
-    pub fn returning(bytes: Vec<u8>) -> Self {
+    /// Succeeds with a single chunk containing `samples`, at 24 kHz mono
+    /// (Chatterbox's typical output format - exact values don't matter to
+    /// callers that only assert on the samples themselves).
+    pub fn returning(samples: Vec<i16>) -> Self {
         Self {
-            result: Ok(bytes),
+            chunks: Ok(vec![samples]),
+            sample_rate: 24_000,
+            channels: 1,
             received: Mutex::new(Vec::new()),
         }
     }
 
     pub fn failing(error: SpeechError) -> Self {
         Self {
-            result: Err(error),
+            chunks: Err(error),
+            sample_rate: 24_000,
+            channels: 1,
             received: Mutex::new(Vec::new()),
         }
     }
@@ -30,18 +41,29 @@ impl FakeSynth {
     }
 }
 
-impl SynthesizeSpeech for FakeSynth {
-    fn synthesize(&self, text: &str) -> Result<Vec<u8>, SpeechError> {
+impl StreamSynthesizeSpeech for FakeSynth {
+    fn synthesize_stream(&self, text: &str) -> Result<PcmStream, SpeechError> {
         self.received.lock().unwrap().push(text.to_string());
-        self.result.clone()
+
+        let chunks = self.chunks.clone()?;
+        let (sender, receiver) = mpsc::channel();
+        for chunk in chunks {
+            let _ = sender.send(Ok(chunk));
+        }
+
+        Ok(PcmStream {
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            chunks: receiver,
+        })
     }
 }
 
-/// A `PlayAudio` spy that records the bytes it was asked to play, or fails
-/// if configured to.
+/// A `PlayPcmStream` spy that drains the stream, recording every sample it
+/// was asked to play (flattened across chunks), or fails if configured to.
 pub struct SpyPlayer {
     should_fail: bool,
-    played: Mutex<Vec<Vec<u8>>>,
+    played: Mutex<Vec<i16>>,
 }
 
 impl SpyPlayer {
@@ -59,14 +81,18 @@ impl SpyPlayer {
         }
     }
 
-    pub fn played(&self) -> Vec<Vec<u8>> {
+    pub fn played(&self) -> Vec<i16> {
         self.played.lock().unwrap().clone()
     }
 }
 
-impl PlayAudio for SpyPlayer {
-    fn play(&self, audio: &[u8]) -> Result<(), SpeechError> {
-        self.played.lock().unwrap().push(audio.to_vec());
+impl PlayPcmStream for SpyPlayer {
+    fn play_stream(&self, stream: PcmStream) -> Result<(), SpeechError> {
+        for chunk in stream.chunks {
+            let samples = chunk?;
+            self.played.lock().unwrap().extend(samples);
+        }
+
         if self.should_fail {
             return Err(SpeechError::Playback("simulated playback failure".into()));
         }
