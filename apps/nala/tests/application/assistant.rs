@@ -215,7 +215,7 @@ fn keeps_only_the_last_messages_in_history() {
     let system_prompt = assistant
         .system_prompt()
         .expect("system prompt should survive pruning");
-    assert!(system_prompt.starts_with("You are Nala, a computer assistant."));
+    assert!(system_prompt.starts_with("<role>\nYou are Nala, a computer assistant."));
 }
 
 #[test]

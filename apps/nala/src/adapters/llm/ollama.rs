@@ -5,12 +5,19 @@ use crate::{
     ports::tool::ToolDefinition,
 };
 
-use wire::{ChatRequest, ChatResponse};
+use wire::{ChatOptions, ChatRequest, ChatResponse};
+
+/// Default context window requested from Ollama, in tokens. Overridable via
+/// `NALA_OLLAMA_NUM_CTX`. Sent per-request (`options.num_ctx`) instead of via
+/// `OLLAMA_CONTEXT_LENGTH`: nala talks to an already-running `ollama serve`
+/// over HTTP, so an env var set here would never reach that process.
+const DEFAULT_NUM_CTX: u32 = 8192;
 
 pub struct OllamaLlm {
     client: Client,
     base_url: String,
     model: String,
+    num_ctx: u32,
 }
 
 impl OllamaLlm {
@@ -20,10 +27,16 @@ impl OllamaLlm {
             .build()
             .map_err(|error| LlmError::RequestFailed(error.to_string()))?;
 
+        let num_ctx = std::env::var("NALA_OLLAMA_NUM_CTX")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_NUM_CTX);
+
         Ok(Self {
             client,
             base_url: base_url.to_string(),
             model: model.to_string(),
+            num_ctx,
         })
     }
 }
@@ -43,6 +56,9 @@ impl Llm for OllamaLlm {
             // on models that support it (e.g. gemma4), which multiplies
             // badly across a tool-call loop. Tool selection doesn't need it.
             think: false,
+            options: ChatOptions {
+                num_ctx: self.num_ctx,
+            },
         };
 
         let response = self.post_chat(&request)?;
@@ -95,6 +111,12 @@ mod wire {
         pub tools: Vec<ChatTool<'a>>,
         pub stream: bool,
         pub think: bool,
+        pub options: ChatOptions,
+    }
+
+    #[derive(Serialize)]
+    pub struct ChatOptions {
+        pub num_ctx: u32,
     }
 
     #[derive(Serialize)]

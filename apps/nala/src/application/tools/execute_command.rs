@@ -40,9 +40,9 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
         let output = self.computer.execute_command(&args.command)?;
 
         if output.trim().is_empty() {
-            Ok("SUCCESS: command completed with no output".to_string())
+            Ok("Command executed, no output. This confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering.".to_string())
         } else {
-            Ok(format!("SUCCESS: {output}"))
+            Ok(format!("Command executed. Output: {output}\n\nThis confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering."))
         }
     }
 
