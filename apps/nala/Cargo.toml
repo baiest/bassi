@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 reedline = "0.38"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
 schemars = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
