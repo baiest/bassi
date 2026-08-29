@@ -12,7 +12,9 @@ const DEFAULT_CFG_WEIGHT: f32 = 0.5;
 const DEFAULT_TEMPERATURE: f32 = 0.8;
 const DEFAULT_TIMEOUT_S: u64 = 30;
 const DEFAULT_AUTOSTART: bool = true;
-const DEFAULT_CMD: &str = "scripts/chatterbox-server.ps1";
+// `Command::new` runs this directly (no shell), so a bare `.ps1` path
+// wouldn't launch - it has to go through `powershell.exe` explicitly.
+const DEFAULT_CMD: &str = "powershell -ExecutionPolicy Bypass -File scripts/chatterbox-server.ps1";
 const DEFAULT_STARTUP_TIMEOUT_S: u64 = 180;
 
 /// Configuration for the Chatterbox TTS backend, resolved from environment
