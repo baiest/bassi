@@ -91,6 +91,36 @@ fn a_non_json_response_line_is_a_protocol_error() {
 }
 
 #[test]
+fn skips_notifications_interleaved_before_the_matching_response() {
+    // MCP servers can emit async notifications (no "id") in between a
+    // request and its response — e.g. computer-use-mcp announcing a
+    // resource update after taking a screenshot. A notification must not
+    // be mistaken for the response.
+    let transport = FakeTransport::with_responses(vec![
+        r#"{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}"#,
+    ]);
+    let mut client = StdioMcpClient::new(transport);
+
+    let result = client.call_tool("screenshot", json!({}));
+
+    assert_eq!(result.unwrap().text, "ok");
+}
+
+#[test]
+fn ignores_a_response_whose_id_does_not_match_the_request() {
+    let transport = FakeTransport::with_responses(vec![
+        r#"{"jsonrpc":"2.0","id":999,"result":{"tools":[]}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#,
+    ]);
+    let mut client = StdioMcpClient::new(transport);
+
+    let result = client.list_tools();
+
+    assert!(result.is_ok());
+}
+
+#[test]
 fn a_transport_read_failure_is_a_transport_error() {
     let mut transport = FakeTransport::new();
     transport.fail_read = true;
