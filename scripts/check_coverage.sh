@@ -35,8 +35,10 @@ fi
 # adapters/mcp/job_object.rs are excluded: all are thin OS boundaries
 # (Command::new / Win32 Job Objects) that can't be exercised portably in CI.
 # The protocol logic they carry (StdioMcpClient) is covered separately
-# against an in-memory Transport fake.
-IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object))\.rs$'
+# against an in-memory Transport fake. cli/prompt.rs is excluded the same
+# way: a thin composition of reedline's own (independently tested) editor,
+# with no branching logic of our own left to exercise.
+IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object))\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 
