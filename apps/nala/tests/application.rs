@@ -42,6 +42,3 @@ mod context_budget;
 
 #[path = "application/narration.rs"]
 mod narration;
-
-#[path = "application/sentences.rs"]
-mod sentences;

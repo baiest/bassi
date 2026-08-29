@@ -16,6 +16,9 @@ fn clear_env() {
         "NALA_CHATTERBOX_CFG_WEIGHT",
         "NALA_CHATTERBOX_TEMPERATURE",
         "NALA_CHATTERBOX_TIMEOUT_S",
+        "NALA_CHATTERBOX_READ_TIMEOUT_S",
+        "NALA_CHATTERBOX_STREAMING_STRATEGY",
+        "NALA_CHATTERBOX_CHUNK_SIZE",
         "NALA_CHATTERBOX_AUTOSTART",
         "NALA_CHATTERBOX_CMD",
         "NALA_CHATTERBOX_STARTUP_TIMEOUT_S",
@@ -45,6 +48,9 @@ fn config_uses_defaults_when_env_absent() {
     assert_eq!(config.cfg_weight, 0.5);
     assert_eq!(config.temperature, 0.8);
     assert_eq!(config.timeout, std::time::Duration::from_secs(30));
+    assert_eq!(config.read_timeout, std::time::Duration::from_secs(60));
+    assert_eq!(config.streaming_strategy, "sentence");
+    assert_eq!(config.streaming_chunk_size, 200);
     assert!(config.autostart);
     assert_eq!(config.startup_timeout, std::time::Duration::from_secs(180));
 
@@ -64,6 +70,9 @@ fn config_reads_overrides_from_env() {
         std::env::set_var("NALA_CHATTERBOX_CFG_WEIGHT", "0.2");
         std::env::set_var("NALA_CHATTERBOX_TEMPERATURE", "1.1");
         std::env::set_var("NALA_CHATTERBOX_TIMEOUT_S", "5");
+        std::env::set_var("NALA_CHATTERBOX_READ_TIMEOUT_S", "90");
+        std::env::set_var("NALA_CHATTERBOX_STREAMING_STRATEGY", "paragraph");
+        std::env::set_var("NALA_CHATTERBOX_CHUNK_SIZE", "350");
         std::env::set_var("NALA_CHATTERBOX_AUTOSTART", "0");
         std::env::set_var("NALA_CHATTERBOX_STARTUP_TIMEOUT_S", "10");
     }
@@ -77,6 +86,9 @@ fn config_reads_overrides_from_env() {
     assert_eq!(config.cfg_weight, 0.2);
     assert_eq!(config.temperature, 1.1);
     assert_eq!(config.timeout, std::time::Duration::from_secs(5));
+    assert_eq!(config.read_timeout, std::time::Duration::from_secs(90));
+    assert_eq!(config.streaming_strategy, "paragraph");
+    assert_eq!(config.streaming_chunk_size, 350);
     assert!(!config.autostart);
     assert_eq!(config.startup_timeout, std::time::Duration::from_secs(10));
 

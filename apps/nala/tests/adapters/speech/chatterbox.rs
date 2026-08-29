@@ -1,23 +1,24 @@
 use nala::adapters::speech::chatterbox::speech::ChatterboxSpeech;
+use nala::adapters::speech::chatterbox::{PcmStream, PlayPcmStream, StreamSynthesizeSpeech};
 use nala::ports::speech::{Speech, SpeechError};
 
 use crate::fake_tts::{FakeSynth, SpyPlayer};
 
 #[test]
-fn speech_sends_text_to_synthesizer_and_plays_returned_bytes() {
+fn speech_sends_text_to_synthesizer_and_plays_returned_samples() {
     use std::sync::Arc;
 
     struct SharedSynth(Arc<FakeSynth>);
-    impl nala::adapters::speech::chatterbox::SynthesizeSpeech for SharedSynth {
-        fn synthesize(&self, text: &str) -> Result<Vec<u8>, SpeechError> {
-            self.0.synthesize(text)
+    impl StreamSynthesizeSpeech for SharedSynth {
+        fn synthesize_stream(&self, text: &str) -> Result<PcmStream, SpeechError> {
+            self.0.synthesize_stream(text)
         }
     }
 
     struct SharedPlayer(Arc<SpyPlayer>);
-    impl nala::adapters::speech::chatterbox::PlayAudio for SharedPlayer {
-        fn play(&self, audio: &[u8]) -> Result<(), SpeechError> {
-            self.0.play(audio)
+    impl PlayPcmStream for SharedPlayer {
+        fn play_stream(&self, stream: PcmStream) -> Result<(), SpeechError> {
+            self.0.play_stream(stream)
         }
     }
 
@@ -32,7 +33,7 @@ fn speech_sends_text_to_synthesizer_and_plays_returned_bytes() {
     speech.say("texto de prueba").unwrap();
 
     assert_eq!(synth.received(), vec!["texto de prueba".to_string()]);
-    assert_eq!(player.played(), vec![vec![9, 9, 9]]);
+    assert_eq!(player.played(), vec![9, 9, 9]);
 }
 
 #[test]
@@ -40,9 +41,9 @@ fn synthesis_failure_is_not_played() {
     use std::sync::Arc;
 
     struct SharedPlayer(Arc<SpyPlayer>);
-    impl nala::adapters::speech::chatterbox::PlayAudio for SharedPlayer {
-        fn play(&self, audio: &[u8]) -> Result<(), SpeechError> {
-            self.0.play(audio)
+    impl PlayPcmStream for SharedPlayer {
+        fn play_stream(&self, stream: PcmStream) -> Result<(), SpeechError> {
+            self.0.play_stream(stream)
         }
     }
 

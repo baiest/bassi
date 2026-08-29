@@ -73,11 +73,13 @@ fn build_chatterbox() -> Result<(Box<dyn Speech + Send>, ChatterboxSupervisor), 
     let synth = HttpChatterbox::new(
         &config.base_url,
         &config.voice,
-        &config.language,
         config.exaggeration,
         config.cfg_weight,
         config.temperature,
+        &config.streaming_strategy,
+        config.streaming_chunk_size,
         config.timeout,
+        config.read_timeout,
     );
     let player = RodioPlayer::new()?;
 

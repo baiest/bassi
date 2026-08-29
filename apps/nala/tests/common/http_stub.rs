@@ -17,6 +17,12 @@ pub struct HttpStub {
 
 impl HttpStub {
     pub fn start(status: u16, body: &'static str) -> Self {
+        Self::start_bytes(status, body.as_bytes().to_vec())
+    }
+
+    /// Like `start`, but for a response body that isn't valid UTF-8 (e.g.
+    /// a WAV header followed by raw PCM samples).
+    pub fn start_bytes(status: u16, body: Vec<u8>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind stub listener");
         let port = listener
             .local_addr()
@@ -30,7 +36,7 @@ impl HttpStub {
             let request_body = read_request_body(&stream);
             let _ = tx.send(request_body);
 
-            respond(stream, status, body);
+            respond(stream, status, &body);
         });
 
         Self {
@@ -74,7 +80,7 @@ fn read_request_body(stream: &std::net::TcpStream) -> String {
     String::from_utf8(body).expect("request body was not valid UTF-8")
 }
 
-fn respond(mut stream: std::net::TcpStream, status: u16, body: &str) {
+fn respond(mut stream: std::net::TcpStream, status: u16, body: &[u8]) {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -82,12 +88,15 @@ fn respond(mut stream: std::net::TcpStream, status: u16, body: &str) {
         _ => "Unknown",
     };
 
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    let header = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
 
     stream
-        .write_all(response.as_bytes())
-        .expect("failed to write stub response");
+        .write_all(header.as_bytes())
+        .expect("failed to write stub response header");
+    stream
+        .write_all(body)
+        .expect("failed to write stub response body");
 }

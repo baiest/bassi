@@ -831,7 +831,10 @@ fn speaks_the_final_answer() {
 }
 
 #[test]
-fn speaks_a_multi_sentence_answer_one_sentence_at_a_time() {
+fn speaks_a_multi_sentence_answer_in_a_single_call() {
+    // Chunking is left to the streaming backend (server-side sentence
+    // strategy) rather than split here into separate `say` calls, so a
+    // multi-sentence answer still reaches `Speech::say` as one string.
     let llm = RepliesWithLlm::new("Hola. Como estas?");
     let computer = FakeComputer::new();
     let speech = SpySpeech::new();
@@ -841,10 +844,7 @@ fn speaks_a_multi_sentence_answer_one_sentence_at_a_time() {
     let result = assistant.process("hello");
 
     assert_eq!(result.unwrap(), "Hola. Como estas?");
-    assert_eq!(
-        spy.spoken(),
-        vec!["Hola.".to_string(), "Como estas?".to_string()]
-    );
+    assert_eq!(spy.spoken(), vec!["Hola. Como estas?".to_string()]);
 }
 
 #[test]
