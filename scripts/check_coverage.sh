@@ -38,7 +38,11 @@ fi
 # against an in-memory Transport fake. cli/prompt.rs is excluded the same
 # way: a thin composition of reedline's own (independently tested) editor,
 # with no branching logic of our own left to exercise.
-IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object))\.rs$|cli[/\\]prompt\.rs$'
+# adapters/speech/chatterbox/supervisor.rs is excluded for the same reason:
+# past its pure `decide` function (covered by chatterbox_supervisor.rs),
+# it's Command::spawn + a real HTTP health check against a live Chatterbox
+# server, which isn't available in CI.
+IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object)|speech[/\\]chatterbox[/\\]supervisor)\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 

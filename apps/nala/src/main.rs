@@ -1,3 +1,4 @@
+use nala::adapters::audio::rodio_player::RodioPlayer;
 #[cfg(windows)]
 use nala::adapters::cancellation::console::CtrlCCancelSignal;
 use nala::adapters::computer::windows::Windows;
@@ -9,6 +10,10 @@ use nala::adapters::mcp::child_process::ChildTransport;
 use nala::adapters::mcp::stdio::StdioMcpClient;
 use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::adapters::speech::async_speech::AsyncSpeech;
+use nala::adapters::speech::chatterbox::HttpChatterbox;
+use nala::adapters::speech::chatterbox::config::ChatterboxConfig;
+use nala::adapters::speech::chatterbox::speech::ChatterboxSpeech;
+use nala::adapters::speech::chatterbox::supervisor::ChatterboxSupervisor;
 use nala::adapters::speech::windows_sapi::WindowsSapiSpeech;
 use nala::application::assistant::Assistant;
 use nala::application::narration::TemplateNarrator;
@@ -37,12 +42,49 @@ impl Speech for NullSpeech {
     }
 }
 
-fn speech_backend() -> Box<dyn Speech + Send> {
-    if std::env::var("NALA_TTS").as_deref() != Ok("off") {
-        Box::new(WindowsSapiSpeech::new())
-    } else {
-        Box::new(NullSpeech)
+/// Resolves the TTS backend from `NALA_TTS` (`chatterbox` | `sapi` | `off`,
+/// default `chatterbox`). Also returns the `ChatterboxSupervisor` when one
+/// was started, so `main` can keep it alive - dropping it kills the server
+/// process it spawned.
+///
+/// Chatterbox is never allowed to leave Nala mute: any failure building it
+/// (missing `reference.wav`, server unreachable, no audio device, ...) logs
+/// a warning and falls back to Windows SAPI instead of propagating.
+fn speech_backend() -> (Box<dyn Speech + Send>, Option<ChatterboxSupervisor>) {
+    match std::env::var("NALA_TTS").as_deref() {
+        Ok("off") => (Box::new(NullSpeech), None),
+        Ok("sapi") => (Box::new(WindowsSapiSpeech::new()), None),
+        _ => match build_chatterbox() {
+            Ok((speech, supervisor)) => (speech, Some(supervisor)),
+            Err(error) => {
+                eprintln!(
+                    "Warning: Chatterbox TTS unavailable ({error}); falling back to Windows SAPI."
+                );
+                (Box::new(WindowsSapiSpeech::new()), None)
+            }
+        },
     }
+}
+
+fn build_chatterbox() -> Result<(Box<dyn Speech + Send>, ChatterboxSupervisor), SpeechError> {
+    let config = ChatterboxConfig::from_env()?;
+    let supervisor = ChatterboxSupervisor::ensure_running(&config)?;
+
+    let synth = HttpChatterbox::new(
+        &config.base_url,
+        &config.voice,
+        &config.language,
+        config.exaggeration,
+        config.cfg_weight,
+        config.temperature,
+        config.timeout,
+    );
+    let player = RodioPlayer::new()?;
+
+    Ok((
+        Box::new(ChatterboxSpeech::new(Box::new(synth), Box::new(player))),
+        supervisor,
+    ))
 }
 
 /// How long to wait for a response to a single MCP request (e.g. a
@@ -92,7 +134,8 @@ fn main() {
     let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "gemma4:e4b")
         .expect("Failed to create Ollama client");
 
-    let speech = AsyncSpeech::new(speech_backend());
+    let (backend, _chatterbox_supervisor) = speech_backend();
+    let speech = AsyncSpeech::new(backend);
     let events = SpeakingEventSink::new(ConsoleEventSink, TemplateNarrator::new(), speech.clone());
 
     #[cfg_attr(not(windows), allow(unused_mut))]

@@ -13,6 +13,9 @@ mod fake_transport;
 #[path = "common/fake_speech.rs"]
 mod fake_speech;
 
+#[path = "common/fake_tts.rs"]
+mod fake_tts;
+
 #[path = "common/fake_events.rs"]
 mod fake_events;
 
@@ -36,6 +39,21 @@ mod speaking;
 
 #[path = "adapters/speech/async_speech.rs"]
 mod async_speech;
+
+#[path = "adapters/speech/chatterbox_config.rs"]
+mod chatterbox_config;
+
+#[path = "adapters/speech/chatterbox.rs"]
+mod chatterbox;
+
+#[path = "adapters/speech/chatterbox_http.rs"]
+mod chatterbox_http;
+
+#[path = "adapters/audio/rodio_player.rs"]
+mod rodio_player;
+
+#[path = "adapters/speech/chatterbox_supervisor.rs"]
+mod chatterbox_supervisor;
 
 #[path = "adapters/mcp/stdio.rs"]
 mod mcp_stdio;
