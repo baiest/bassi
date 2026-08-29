@@ -1,3 +1,4 @@
+#[cfg(windows)]
 use nala::adapters::cancellation::console::CtrlCCancelSignal;
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::environment::system::SystemEnvironment;
@@ -67,11 +68,15 @@ fn main() {
 
     let events = ConsoleEventSink;
 
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut assistant = Assistant::new(llm, dispatcher, registry, events);
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
-    // handles it) cancels the turn instead of killing the process. Falls
-    // back to no cancellation if Windows refuses to install the handler.
+    // handles it) cancels the turn instead of killing the process. Windows
+    // only — `CtrlCCancelSignal` is a `SetConsoleCtrlHandler` wrapper, so
+    // this whole integration doesn't exist on other platforms; falls back
+    // to no cancellation if Windows itself refuses to install the handler.
+    #[cfg(windows)]
     let cancel_signal = match CtrlCCancelSignal::install() {
         Ok(signal) => {
             assistant = assistant.with_cancel_signal(Box::new(signal.clone()));
@@ -84,6 +89,8 @@ fn main() {
             None
         }
     };
+    #[cfg(not(windows))]
+    let cancel_signal: Option<()> = None;
 
     let mut reader = MultilineReader::new();
 
@@ -98,9 +105,12 @@ fn main() {
             None => break,
         };
 
+        #[cfg(windows)]
         if let Some(signal) = &cancel_signal {
             signal.reset();
         }
+        #[cfg(not(windows))]
+        let _ = &cancel_signal;
 
         match assistant.process(input.trim()) {
             Ok(response) => println!("{response}"),
