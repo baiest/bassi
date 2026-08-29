@@ -8,7 +8,8 @@ use crate::application::assistant::{
     AssistantError, assistant_text_message, assistant_tool_call_message, system_message,
     tool_result_message, user_message,
 };
-use crate::ports::events::{Event, EventSink, TurnState};
+use crate::application::context_budget;
+use crate::ports::events::{BudgetStep, Event, EventSink, TurnState};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
 use crate::ports::tool::ToolDefinition;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
@@ -53,7 +54,11 @@ where
         self.events.emit(Event::RequestStarted);
         self.set_state(TurnState::Receiving);
 
-        self.transcript.push(user_message(input));
+        self.transcript.push(
+            user_message(input),
+            self.token_counter.as_ref(),
+            self.budget.available_tokens(),
+        );
 
         let mut messages = self.build_prompt_messages()?;
         // Cloned rather than borrowed from `self.registry`, so `tools` doesn't
@@ -68,6 +73,12 @@ where
             messages.push(assistant_text_message(format!("Plan:\n{plan}")));
         }
 
+        // Everything built so far (persisted history, computer context,
+        // plan) is off-limits to the per-turn budget fitter below — only
+        // what this turn adds from here (tool calls and their results) is
+        // evictable.
+        let protected_prefix = messages.len();
+
         let mut last_tool_call: Option<ToolCall> = None;
         let mut identical_repeats: usize = 0;
         let mut tool_call_count: usize = 0;
@@ -78,6 +89,8 @@ where
             if self.cancel.is_cancelled() {
                 return Err(self.cancelled(request_start));
             }
+
+            self.fit_to_budget(&mut messages, protected_prefix);
 
             self.set_state(TurnState::Thinking);
             let response = self.generate_with_retry(&messages, request_start)?;
@@ -162,7 +175,11 @@ where
             match response.text {
                 Some(text) if !text.trim().is_empty() => {
                     self.set_state(TurnState::Responding);
-                    self.transcript.push(assistant_text_message(text.clone()));
+                    self.transcript.push(
+                        assistant_text_message(text.clone()),
+                        self.token_counter.as_ref(),
+                        self.budget.available_tokens(),
+                    );
 
                     let duration = request_start.elapsed();
                     self.events.emit(Event::RequestCompleted { duration });
@@ -240,8 +257,12 @@ where
         let duration = start.elapsed();
 
         match &outcome {
-            LlmCallOutcome::Completed(Ok(_)) => {
+            LlmCallOutcome::Completed(Ok(response)) => {
                 self.events.emit(Event::LlmCompleted { duration });
+                self.events.emit(Event::TokensUsed {
+                    prompt_tokens: response.usage.prompt_tokens,
+                    completion_tokens: response.usage.completion_tokens,
+                });
             }
             LlmCallOutcome::Completed(Err(error)) => {
                 self.events.emit(Event::RequestFailed {
@@ -372,6 +393,119 @@ where
             Some(plan) if !plan.trim().is_empty() => Some(plan),
             _ => None,
         }
+    }
+
+    /// Keeps `messages[protected_prefix..]` within the per-turn token
+    /// budget, applying eviction steps in order of increasing cost until it
+    /// fits or nothing more can be done:
+    /// 1. strip images from tool results older than the most recent few,
+    /// 2. truncate long tool-result text to a head/tail excerpt,
+    /// 3. summarize the middle of the evictable range into one message
+    ///    (`compact`), keeping the most recent messages intact,
+    /// 4. as a last resort, drop the oldest evictable messages outright.
+    fn fit_to_budget(&mut self, messages: &mut Vec<Message>, protected_prefix: usize) {
+        let available = self.budget.available_tokens();
+
+        if self.token_counter.estimate(messages) <= available {
+            return;
+        }
+
+        let dropped_images = context_budget::evict_images(
+            messages,
+            protected_prefix,
+            self.budget.keep_recent_images,
+        );
+        if dropped_images > 0 {
+            self.events.emit(Event::BudgetPressure {
+                step: BudgetStep::DroppedImages {
+                    count: dropped_images,
+                },
+                remaining_estimate: self.token_counter.estimate(messages),
+            });
+        }
+        if self.token_counter.estimate(messages) <= available {
+            return;
+        }
+
+        let truncated = context_budget::truncate_long_tool_results(
+            messages,
+            protected_prefix,
+            self.budget.truncate_head_chars,
+            self.budget.truncate_tail_chars,
+        );
+        if truncated > 0 {
+            self.events.emit(Event::BudgetPressure {
+                step: BudgetStep::TruncatedText { count: truncated },
+                remaining_estimate: self.token_counter.estimate(messages),
+            });
+        }
+        if self.token_counter.estimate(messages) <= available {
+            return;
+        }
+
+        if let Some(turns_compacted) = self.compact(messages, protected_prefix) {
+            self.events
+                .emit(Event::TranscriptCompacted { turns_compacted });
+        }
+        if self.token_counter.estimate(messages) <= available {
+            return;
+        }
+
+        let dropped_turns = context_budget::drop_oldest_until_fits(
+            messages,
+            protected_prefix,
+            available,
+            self.token_counter.as_ref(),
+        );
+        if dropped_turns > 0 {
+            self.events.emit(Event::BudgetPressure {
+                step: BudgetStep::DroppedTurns {
+                    count: dropped_turns,
+                },
+                remaining_estimate: self.token_counter.estimate(messages),
+            });
+        }
+    }
+
+    /// Summarizes `messages[protected_prefix..split]` (everything evictable
+    /// except the most recent `budget.keep_recent_uncompacted` messages)
+    /// into a single system message, via an extra LLM call. Returns how
+    /// many messages were folded into the summary, or `None` if there was
+    /// nothing to compact or the summarizing call failed/was cancelled — in
+    /// either case the caller falls back to the next eviction step.
+    fn compact(&mut self, messages: &mut Vec<Message>, protected_prefix: usize) -> Option<usize> {
+        let split = messages
+            .len()
+            .saturating_sub(self.budget.keep_recent_uncompacted)
+            .max(protected_prefix);
+
+        if split <= protected_prefix {
+            return None;
+        }
+
+        let mut summarize_messages: Vec<Message> = messages[protected_prefix..split].to_vec();
+        summarize_messages.push(system_message(
+            "Summarize the conversation above in a few sentences, preserving \
+             important facts, decisions, and outcomes the assistant will \
+             still need. Respond with ONLY the summary as plain text."
+                .to_string(),
+        ));
+
+        let outcome = self.call_llm(summarize_messages, Vec::new());
+        let summary = match outcome {
+            LlmCallOutcome::Completed(Ok(response)) => response.text?,
+            LlmCallOutcome::Completed(Err(_)) | LlmCallOutcome::Cancelled => return None,
+        };
+        if summary.trim().is_empty() {
+            return None;
+        }
+
+        let turns_compacted = split - protected_prefix;
+        let summary_message =
+            system_message(format!("Summary of earlier conversation:\n{summary}"));
+        messages.splice(protected_prefix..split, std::iter::once(summary_message));
+
+        Some(turns_compacted)
     }
 
     /// Context can change between turns, so it is fetched fresh each time

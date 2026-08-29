@@ -1,12 +1,5 @@
 use crate::ports::llm::Message;
-
-/// Caps how many messages the transcript keeps, so a long-running session
-/// doesn't grow the prompt (and its token cost) without bound. The system
-/// prompt at index 0 is never counted against this limit or pruned.
-///
-/// This is a message-count budget, not a token budget — see the context
-/// budget work planned for a later phase.
-pub const MAX_HISTORY_MESSAGES: usize = 20;
+use crate::ports::token_counter::TokenCounter;
 
 /// The persisted conversation history across turns. Only complete text
 /// turns are kept here — the tool calls and tool results a turn makes along
@@ -26,11 +19,15 @@ impl Transcript {
     }
 
     /// Appends a message, then drops the oldest non-system messages until
-    /// the transcript is back within `MAX_HISTORY_MESSAGES`.
-    pub fn push(&mut self, message: Message) {
+    /// the transcript's estimated token cost is back within `max_tokens`.
+    /// The system prompt at index 0 is never pruned. Unlike the per-turn
+    /// budget in `context_budget.rs` (images, truncation, compaction),
+    /// pruning here is a plain drop — persisted history is text-only, so
+    /// there are no images to strip and nothing worth truncating in place.
+    pub fn push(&mut self, message: Message, counter: &dyn TokenCounter, max_tokens: usize) {
         self.messages.push(message);
 
-        while self.messages.len() > MAX_HISTORY_MESSAGES {
+        while self.messages.len() > 1 && counter.estimate(&self.messages) > max_tokens {
             self.messages.remove(1);
         }
     }

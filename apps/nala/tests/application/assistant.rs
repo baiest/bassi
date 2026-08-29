@@ -1,7 +1,8 @@
 use nala::{
     adapters::events::console::ConsoleEventSink,
     application::{
-        assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
+        assistant::{Assistant, AssistantError},
+        context_budget::ContextBudget,
         loop_limits::LoopLimits,
         tools::{
             Tool,
@@ -21,11 +22,12 @@ use crate::{
     fake_events::RecordingEventSink,
     fake_llm::{
         AlwaysAnswersEmptyLlm, AlwaysCallsToolLlm, AlwaysFailsRetryableLlm, AlwaysRepliesTextLlm,
-        AnswersEmptyTwiceThenTextLlm, CallsScreenshotThenAnswersLlm,
-        ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm, FailingLlm,
-        FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm, FailsWithInvalidResponseLlm,
-        FakeLlm, HangsOnRealCallLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        AnswersEmptyTwiceThenTextLlm, CallsScreenshotFiveTimesThenAnswersLlm,
+        CallsScreenshotThenAnswersLlm, ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm,
+        FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
+        FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, PlansThenExecutesLlm,
+        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm,
+        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
@@ -222,16 +224,31 @@ fn keeps_conversation_history_across_process_calls() {
 }
 
 #[test]
-fn keeps_only_the_last_messages_in_history() {
-    let mut assistant = assistant_with(AlwaysRepliesTextLlm::new(), FakeComputer::new());
+fn prunes_old_history_once_it_exceeds_the_token_budget() {
+    const TURNS: usize = 30;
 
-    for turn in 0..(MAX_HISTORY_MESSAGES + 10) {
+    // A small enough budget that pruning has to kick in well before 30
+    // turns' worth of "turn N" messages would fit, but large enough to
+    // hold the system prompt plus a handful of them.
+    let mut assistant = assistant_with(AlwaysRepliesTextLlm::new(), FakeComputer::new())
+        .with_budget(ContextBudget {
+            max_tokens: 600,
+            output_reserve: 0,
+            ..ContextBudget::default()
+        });
+
+    for turn in 0..TURNS {
         assistant
             .process(&format!("turn {turn}"))
             .expect("turn should succeed");
     }
 
-    assert!(assistant.message_count() <= MAX_HISTORY_MESSAGES);
+    assert!(
+        assistant.message_count() < TURNS * 2,
+        "expected pruning to keep history well below {} messages, got {}",
+        TURNS * 2,
+        assistant.message_count()
+    );
     let system_prompt = assistant
         .system_prompt()
         .expect("system prompt should survive pruning");
@@ -569,6 +586,127 @@ fn stops_when_cancelled_before_a_tool_call_runs() {
     assert_eq!(
         tool_starts, 0,
         "no tool should run once cancellation was already requested"
+    );
+}
+
+#[test]
+fn evicts_old_images_once_the_turn_exceeds_its_token_budget() {
+    let mcp = FakeMcpClient::new()
+        .with_tool("screenshot", "Take a screenshot")
+        .returning(McpToolResult {
+            text: "here is the screen".to_string(),
+            images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+        });
+    let toolset = ComputerUseToolset::connect(mcp, &["screenshot"]).unwrap();
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
+        FakeComputer::new(),
+    )));
+    dispatcher.register(Tools::ComputerUse(toolset));
+
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        CallsScreenshotFiveTimesThenAnswersLlm::new(),
+        dispatcher,
+        registry(),
+        events,
+    )
+    .with_budget(ContextBudget {
+        // 5 screenshots would cost far more than this; only the 2 most
+        // recent should survive once pressure kicks in.
+        max_tokens: 2000,
+        output_reserve: 0,
+        keep_recent_images: 2,
+        ..ContextBudget::default()
+    });
+
+    let result = assistant.process("take five screenshots");
+    assert_eq!(result.unwrap(), "done");
+
+    let dropped_image_events: usize = assistant
+        .events()
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::BudgetPressure {
+                step: nala::ports::events::BudgetStep::DroppedImages { count },
+                ..
+            } => Some(count),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        dropped_image_events > 0,
+        "expected at least one image to have been evicted for budget pressure"
+    );
+}
+
+#[test]
+fn emits_tokens_used_after_a_completed_llm_call() {
+    let stub_llm = FakeLlm::new();
+
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        stub_llm,
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    let tokens_used = assistant
+        .events()
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::TokensUsed { .. }));
+    assert!(
+        tokens_used,
+        "expected at least one TokensUsed event after a completed call"
+    );
+}
+
+#[test]
+fn compacts_old_turns_into_a_summary_once_the_budget_is_exceeded() {
+    // A very small budget with generous keep_recent_uncompacted forces
+    // fit_to_budget past the deterministic steps (no images, nothing long
+    // enough to truncate) straight to compaction.
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        RequestsTwoToolCallsAtOnceThenAnswersLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    )
+    .with_budget(ContextBudget {
+        max_tokens: 5,
+        output_reserve: 0,
+        keep_recent_uncompacted: 0,
+        ..ContextBudget::default()
+    });
+
+    let result = assistant.process("run two commands");
+    assert_eq!(result.unwrap(), "done");
+
+    let compacted = assistant
+        .events()
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::TranscriptCompacted { .. }));
+    assert!(
+        compacted,
+        "expected compaction to fire once deterministic eviction wasn't enough"
     );
 }
 

@@ -161,6 +161,13 @@ mod wire {
     #[derive(Deserialize, Debug)]
     pub struct ChatResponse {
         message: ChatMessage,
+        /// Tokens consumed by the prompt. Absent on some Ollama versions or
+        /// backends — treated as "unknown", not zero.
+        #[serde(default)]
+        prompt_eval_count: Option<u32>,
+        /// Tokens generated in the response.
+        #[serde(default)]
+        eval_count: Option<u32>,
     }
 
     #[derive(Deserialize, Debug)]
@@ -238,6 +245,15 @@ mod wire {
 
         let text = Some(response.message.content).filter(|content| !content.is_empty());
 
-        LlmResponse { text, tool_calls }
+        let usage = crate::ports::llm::Usage {
+            prompt_tokens: response.prompt_eval_count,
+            completion_tokens: response.eval_count,
+        };
+
+        LlmResponse {
+            text,
+            tool_calls,
+            usage,
+        }
     }
 }

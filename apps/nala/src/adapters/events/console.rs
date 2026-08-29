@@ -1,4 +1,4 @@
-use crate::ports::events::{Event, EventSink, TurnState};
+use crate::ports::events::{BudgetStep, Event, EventSink, TurnState};
 
 pub struct ConsoleEventSink;
 
@@ -63,6 +63,34 @@ impl EventSink for ConsoleEventSink {
             }
             Event::Cancelled => {
                 println!("[CANCELLED] turn stopped\n");
+            }
+            Event::TokensUsed {
+                prompt_tokens,
+                completion_tokens,
+            } => {
+                let prompt = prompt_tokens
+                    .map(|tokens| tokens.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let completion = completion_tokens
+                    .map(|tokens| tokens.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                println!("[TOKENS] prompt={prompt} completion={completion}");
+            }
+            Event::BudgetPressure {
+                step,
+                remaining_estimate,
+            } => {
+                let label = match step {
+                    BudgetStep::DroppedImages { count } => format!("dropped {count} image(s)"),
+                    BudgetStep::TruncatedText { count } => {
+                        format!("truncated {count} tool result(s)")
+                    }
+                    BudgetStep::DroppedTurns { count } => format!("dropped {count} old turn(s)"),
+                };
+                println!("[BUDGET] {label}, ~{remaining_estimate} tokens remaining");
+            }
+            Event::TranscriptCompacted { turns_compacted } => {
+                println!("[BUDGET] compacted {turns_compacted} old turn(s) into a summary\n");
             }
         }
     }

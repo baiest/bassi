@@ -16,6 +16,15 @@ pub enum LlmError {
     InvalidResponse(String),
 }
 
+/// Token accounting for one completed LLM call, when the backend reports
+/// it (Ollama does, via `prompt_eval_count`/`eval_count`). `None` fields
+/// mean the backend didn't report that count, not that it was zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+}
+
 /// A single LLM turn. `tool_calls` may hold more than one entry — a model
 /// can request several actions in one response (e.g. "screenshot" won't do
 /// that, but many models batch independent calls) — and the loop executes
@@ -26,6 +35,7 @@ pub enum LlmError {
 pub struct LlmResponse {
     pub text: Option<String>,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Usage,
 }
 
 impl LlmResponse {
@@ -33,6 +43,7 @@ impl LlmResponse {
         Self {
             text: Some(text.into()),
             tool_calls: Vec::new(),
+            usage: Usage::default(),
         }
     }
 
@@ -40,6 +51,7 @@ impl LlmResponse {
         Self {
             text: None,
             tool_calls: vec![tool_call],
+            usage: Usage::default(),
         }
     }
 
@@ -47,6 +59,7 @@ impl LlmResponse {
         Self {
             text: None,
             tool_calls,
+            usage: Usage::default(),
         }
     }
 
