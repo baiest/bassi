@@ -10,17 +10,19 @@ use nala::{
             registry::ToolRegistry,
         },
     },
-    ports::events::Event,
+    ports::events::{Event, TurnState},
 };
 
 use crate::{
     fake_computer::FakeComputer,
     fake_events::RecordingEventSink,
     fake_llm::{
-        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, CallsScreenshotThenAnswersLlm,
+        AlwaysAnswersEmptyLlm, AlwaysCallsToolLlm, AlwaysRepliesTextLlm,
+        AnswersEmptyTwiceThenTextLlm, CallsScreenshotThenAnswersLlm,
         ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm, FailingLlm,
         FailsPlanningThenExecutesLlm, FakeLlm, PlansThenExecutesLlm,
-        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm, ResolvesInOneToolCallLlm,
+        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm,
+        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
@@ -321,6 +323,93 @@ fn emits_plan_created_with_the_generated_plan() {
     assert_eq!(
         plan,
         Some("1. abre spotify\n2. dale play a la cancion".to_string())
+    );
+}
+
+#[test]
+fn executes_all_tool_calls_requested_in_a_single_llm_response() {
+    let events = RecordingEventSink::new();
+    let tool = ExecuteCommandTool::new(FakeComputer::new());
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let mut assistant = Assistant::new(
+        RequestsTwoToolCallsAtOnceThenAnswersLlm::new(),
+        dispatcher,
+        registry(),
+        events,
+    );
+
+    let result = assistant.process("run two commands");
+    assert_eq!(result.unwrap(), "done");
+
+    let tool_starts = assistant
+        .events()
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::ToolStarted { .. }))
+        .count();
+    assert_eq!(
+        tool_starts, 2,
+        "both tool calls from the single LLM response should have run"
+    );
+}
+
+#[test]
+fn nudges_the_model_and_continues_on_an_empty_response() {
+    let mut assistant = assistant_with(AnswersEmptyTwiceThenTextLlm::new(), FakeComputer::new());
+
+    let result = assistant.process("say something");
+
+    assert_eq!(result.unwrap(), "done");
+}
+
+#[test]
+fn gives_up_when_the_model_keeps_answering_empty() {
+    let mut assistant = assistant_with(AlwaysAnswersEmptyLlm::new(), FakeComputer::new());
+
+    let result = assistant.process("say something");
+
+    assert!(matches!(result, Err(AssistantError::EmptyResponse)));
+}
+
+#[test]
+fn emits_turn_states_in_order() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    let states: Vec<TurnState> = assistant
+        .events()
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::StateChanged { state } => Some(*state),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        states,
+        vec![
+            TurnState::Receiving,
+            TurnState::Planning,
+            TurnState::Thinking,
+            TurnState::Executing,
+            TurnState::Thinking,
+            TurnState::Responding,
+        ]
     );
 }
 

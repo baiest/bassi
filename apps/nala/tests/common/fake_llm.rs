@@ -22,19 +22,19 @@ impl Llm for FakeLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         self.calls += 1;
 
         if self.calls == 1 {
-            return Ok(LlmResponse::ToolCall(ToolCall {
+            return Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: r#"{"command":"start chrome"}"#.to_string(),
             }));
         }
 
-        Ok(LlmResponse::Text("chrome opened".to_string()))
+        Ok(LlmResponse::text("chrome opened".to_string()))
     }
 }
 
@@ -61,7 +61,7 @@ impl Llm for AlwaysCallsToolLlm {
         let calls = self.calls;
         self.calls += 1;
 
-        Ok(LlmResponse::ToolCall(ToolCall {
+        Ok(LlmResponse::tool_call(ToolCall {
             name: "unregistered_tool".to_string(),
             arguments: format!(r#"{{"command":"echo {calls}"}}"#),
         }))
@@ -105,13 +105,13 @@ impl Llm for EchoesLastMessageLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         self.calls += 1;
 
         if self.calls == 1 {
-            return Ok(LlmResponse::ToolCall(ToolCall {
+            return Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: r#"{"command":"start chrome"}"#.to_string(),
             }));
@@ -122,7 +122,7 @@ impl Llm for EchoesLastMessageLlm {
             .map(|message| message.content.clone())
             .unwrap_or_default();
 
-        Ok(LlmResponse::Text(last_content))
+        Ok(LlmResponse::text(last_content))
     }
 }
 
@@ -143,7 +143,7 @@ impl Llm for AlwaysRepliesTextLlm {
         _messages: &[Message],
         _tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
-        Ok(LlmResponse::Text("ok".to_string()))
+        Ok(LlmResponse::text("ok".to_string()))
     }
 }
 
@@ -165,19 +165,19 @@ impl Llm for ResolvesInOneToolCallLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         self.calls += 1;
 
         if self.calls == 1 {
-            return Ok(LlmResponse::ToolCall(ToolCall {
+            return Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: r#"{"command":"date"}"#.to_string(),
             }));
         }
 
-        Ok(LlmResponse::Text("it's 10:00 AM".to_string()))
+        Ok(LlmResponse::text("it's 10:00 AM".to_string()))
     }
 }
 
@@ -201,7 +201,7 @@ impl Llm for RetriesSameToolWithDifferentArgsLlm {
         let calls = self.calls;
         self.calls += 1;
 
-        Ok(LlmResponse::ToolCall(ToolCall {
+        Ok(LlmResponse::tool_call(ToolCall {
             name: "execute_command".to_string(),
             arguments: format!(r#"{{"command":"date-variant-{calls}"}}"#),
         }))
@@ -223,7 +223,7 @@ impl Llm for RepeatsSameToolCallLlm {
         _messages: &[Message],
         _tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
-        Ok(LlmResponse::ToolCall(ToolCall {
+        Ok(LlmResponse::tool_call(ToolCall {
             name: "execute_command".to_string(),
             arguments: r#"{"command":"start chrome"}"#.to_string(),
         }))
@@ -252,18 +252,18 @@ impl Llm for ChainsDistinctToolCallsThenAnswersLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         let calls = self.calls;
         self.calls += 1;
 
         match calls {
-            0 | 1 => Ok(LlmResponse::ToolCall(ToolCall {
+            0 | 1 => Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: format!(r#"{{"command":"date-step-{calls}"}}"#),
             })),
-            _ => Ok(LlmResponse::Text("done".to_string())),
+            _ => Ok(LlmResponse::text("done".to_string())),
         }
     }
 }
@@ -288,18 +288,18 @@ impl Llm for CallsScreenshotThenAnswersLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         let calls = self.calls;
         self.calls += 1;
 
         match calls {
-            0 => Ok(LlmResponse::ToolCall(ToolCall {
+            0 => Ok(LlmResponse::tool_call(ToolCall {
                 name: "screenshot".to_string(),
                 arguments: "{}".to_string(),
             })),
-            _ => Ok(LlmResponse::Text("done".to_string())),
+            _ => Ok(LlmResponse::text("done".to_string())),
         }
     }
 }
@@ -325,18 +325,18 @@ impl Llm for RepeatsSameCallTwiceThenAnswersLlm {
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError> {
         if tools.is_empty() {
-            return Ok(LlmResponse::Text("plan".to_string()));
+            return Ok(LlmResponse::text("plan".to_string()));
         }
 
         let calls = self.calls;
         self.calls += 1;
 
         match calls {
-            0 | 1 => Ok(LlmResponse::ToolCall(ToolCall {
+            0 | 1 => Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: r#"{"command":"date"}"#.to_string(),
             })),
-            _ => Ok(LlmResponse::Text("done".to_string())),
+            _ => Ok(LlmResponse::text("done".to_string())),
         }
     }
 }
@@ -372,16 +372,114 @@ impl Llm for PlansThenExecutesLlm {
         self.calls += 1;
 
         match calls {
-            0 => Ok(LlmResponse::Text(self.plan.clone())),
+            0 => Ok(LlmResponse::text(self.plan.clone())),
             1 => {
                 *self.messages_on_execute_call.borrow_mut() = Some(messages.to_vec());
-                Ok(LlmResponse::ToolCall(ToolCall {
+                Ok(LlmResponse::tool_call(ToolCall {
                     name: "execute_command".to_string(),
                     arguments: r#"{"command":"start spotify"}"#.to_string(),
                 }))
             }
-            _ => Ok(LlmResponse::Text("done".to_string())),
+            _ => Ok(LlmResponse::text("done".to_string())),
         }
+    }
+}
+
+/// Requests two distinct tool calls in a single response, then answers with
+/// text. Used to verify the loop executes every tool call in one LLM
+/// round-trip instead of only the first.
+#[derive(Default)]
+pub struct RequestsTwoToolCallsAtOnceThenAnswersLlm {
+    calls: u32,
+}
+
+impl RequestsTwoToolCallsAtOnceThenAnswersLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for RequestsTwoToolCallsAtOnceThenAnswersLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 => Ok(LlmResponse::tool_calls(vec![
+                ToolCall {
+                    name: "execute_command".to_string(),
+                    arguments: r#"{"command":"date-a"}"#.to_string(),
+                },
+                ToolCall {
+                    name: "execute_command".to_string(),
+                    arguments: r#"{"command":"date-b"}"#.to_string(),
+                },
+            ])),
+            _ => Ok(LlmResponse::text("done")),
+        }
+    }
+}
+
+/// Answers with empty text twice (no tool calls), then with real text. Used
+/// to verify the loop nudges the model instead of ending the turn on an
+/// empty response, but still terminates instead of looping forever.
+#[derive(Default)]
+pub struct AnswersEmptyTwiceThenTextLlm {
+    calls: u32,
+}
+
+impl AnswersEmptyTwiceThenTextLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for AnswersEmptyTwiceThenTextLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 | 1 => Ok(LlmResponse::default()),
+            _ => Ok(LlmResponse::text("done")),
+        }
+    }
+}
+
+/// Always answers with empty text and no tool call. Used to verify the loop
+/// eventually gives up instead of looping forever.
+#[derive(Default)]
+pub struct AlwaysAnswersEmptyLlm;
+
+impl AlwaysAnswersEmptyLlm {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for AlwaysAnswersEmptyLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        Ok(LlmResponse::default())
     }
 }
 
@@ -409,11 +507,11 @@ impl Llm for FailsPlanningThenExecutesLlm {
 
         match calls {
             0 => Err(LlmError::RequestFailed("connection refused".to_string())),
-            1 => Ok(LlmResponse::ToolCall(ToolCall {
+            1 => Ok(LlmResponse::tool_call(ToolCall {
                 name: "execute_command".to_string(),
                 arguments: r#"{"command":"start spotify"}"#.to_string(),
             })),
-            _ => Ok(LlmResponse::Text("done".to_string())),
+            _ => Ok(LlmResponse::text("done".to_string())),
         }
     }
 }

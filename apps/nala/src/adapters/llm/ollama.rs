@@ -221,17 +221,23 @@ mod wire {
             .collect()
     }
 
-    /// Ollama can return several tool calls in one response; only the first
-    /// is used, the rest are dropped.
+    /// Ollama can return several tool calls in one response; all of them are
+    /// kept, so the loop can execute every requested action in this turn
+    /// instead of silently dropping all but the first.
     pub fn to_domain_response(response: ChatResponse) -> LlmResponse {
-        let first_tool_call = response.message.tool_calls.into_iter().flatten().next();
-
-        match first_tool_call {
-            Some(tool_call) => LlmResponse::ToolCall(ToolCall {
+        let tool_calls: Vec<ToolCall> = response
+            .message
+            .tool_calls
+            .into_iter()
+            .flatten()
+            .map(|tool_call| ToolCall {
                 name: tool_call.function.name,
                 arguments: tool_call.function.arguments.to_string(),
-            }),
-            None => LlmResponse::Text(response.message.content),
-        }
+            })
+            .collect();
+
+        let text = Some(response.message.content).filter(|content| !content.is_empty());
+
+        LlmResponse { text, tool_calls }
     }
 }
