@@ -7,6 +7,9 @@ mod fake_llm;
 #[path = "common/fake_mcp.rs"]
 mod fake_mcp;
 
+#[path = "common/fake_events.rs"]
+mod fake_events;
+
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
 
