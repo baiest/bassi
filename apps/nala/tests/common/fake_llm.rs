@@ -87,6 +87,83 @@ impl Llm for FailingLlm {
     }
 }
 
+/// Fails the first two calls with a retryable error, then succeeds with
+/// text. Used to verify the loop retries a retryable LLM failure instead of
+/// aborting the turn immediately.
+#[derive(Default)]
+pub struct FailsTwiceThenSucceedsLlm {
+    calls: u32,
+}
+
+impl FailsTwiceThenSucceedsLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for FailsTwiceThenSucceedsLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        if calls < 2 {
+            return Err(LlmError::RequestFailed("connection refused".to_string()));
+        }
+
+        Ok(LlmResponse::text("recovered"))
+    }
+}
+
+/// Always fails with a retryable error. Used to verify the loop gives up
+/// after `max_llm_retries` instead of retrying forever.
+#[derive(Default)]
+pub struct AlwaysFailsRetryableLlm;
+
+impl AlwaysFailsRetryableLlm {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for AlwaysFailsRetryableLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        Err(LlmError::RequestFailed("connection refused".to_string()))
+    }
+}
+
+/// Fails with a non-retryable error (a response that doesn't parse). Used
+/// to verify the loop doesn't waste retries on a failure retrying can't fix.
+#[derive(Default)]
+pub struct FailsWithInvalidResponseLlm;
+
+impl FailsWithInvalidResponseLlm {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for FailsWithInvalidResponseLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        Err(LlmError::InvalidResponse("malformed body".to_string()))
+    }
+}
+
 #[derive(Default)]
 pub struct EchoesLastMessageLlm {
     calls: u32,

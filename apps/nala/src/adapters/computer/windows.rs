@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use crate::ports::{
     computer::{Computer, ComputerContext, ComputerError},
@@ -25,9 +26,13 @@ impl<P: Process, E: Environment> Computer for Windows<P, E> {
 
     const SYSTEM_DESCRIPTION: &'static str = "This is a Windows computer.";
 
-    fn execute_command(&mut self, command: &str) -> Result<String, ComputerError> {
+    fn execute_command(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String, ComputerError> {
         self.process
-            .spawn("cmd", &["/C", command])
+            .spawn("cmd", &["/C", command], timeout)
             .map_err(|error| ComputerError::CommandFailed(format!("{error:?}")))
     }
 

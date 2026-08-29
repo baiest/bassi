@@ -10,6 +10,12 @@ mod fake_mcp;
 #[path = "common/fake_events.rs"]
 mod fake_events;
 
+#[path = "common/fake_clock.rs"]
+mod fake_clock;
+
+#[path = "common/fake_cancel.rs"]
+mod fake_cancel;
+
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
 

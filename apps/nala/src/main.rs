@@ -1,3 +1,4 @@
+use nala::adapters::cancellation::console::CtrlCCancelSignal;
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::environment::system::SystemEnvironment;
 use nala::adapters::events::console::ConsoleEventSink;
@@ -16,6 +17,12 @@ use nala::cli::prompt::MultilineReader;
 
 type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
 type McpClientType = StdioMcpClient<ChildTransport>;
+
+/// How long to wait for a response to a single MCP request (e.g. a
+/// screenshot or a click) before giving up on it. Generous because
+/// computer-use-mcp can be slow to take a screenshot on a loaded machine,
+/// bounded so a wedged MCP server doesn't hang the turn forever.
+const MCP_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn main() {
     let process = WindowsProcess::new();
@@ -62,6 +69,22 @@ fn main() {
 
     let mut assistant = Assistant::new(llm, dispatcher, registry, events);
 
+    // Ctrl+C during a turn (not at the prompt, where reedline already
+    // handles it) cancels the turn instead of killing the process. Falls
+    // back to no cancellation if Windows refuses to install the handler.
+    let cancel_signal = match CtrlCCancelSignal::install() {
+        Ok(signal) => {
+            assistant = assistant.with_cancel_signal(Box::new(signal.clone()));
+            Some(signal)
+        }
+        Err(error) => {
+            eprintln!(
+                "Warning: could not install Ctrl+C handler ({error}); Ctrl+C during a turn will not cancel it."
+            );
+            None
+        }
+    };
+
     let mut reader = MultilineReader::new();
 
     loop {
@@ -75,6 +98,10 @@ fn main() {
             None => break,
         };
 
+        if let Some(signal) = &cancel_signal {
+            signal.reset();
+        }
+
         match assistant.process(input.trim()) {
             Ok(response) => println!("{response}"),
             Err(e) => eprintln!("Error: {e}"),
@@ -83,8 +110,12 @@ fn main() {
 }
 
 fn connect_computer_use() -> Result<ComputerUseToolset<McpClientType>, String> {
-    let transport = ChildTransport::spawn("npx", &["-y", "@zavora-ai/computer-use-mcp@7.1.0"])
-        .map_err(|error| error.to_string())?;
+    let transport = ChildTransport::spawn(
+        "npx",
+        &["-y", "@zavora-ai/computer-use-mcp@7.1.0"],
+        MCP_CALL_TIMEOUT,
+    )
+    .map_err(|error| error.to_string())?;
 
     let client = StdioMcpClient::new(transport);
 

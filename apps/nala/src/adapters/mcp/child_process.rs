@@ -1,5 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::adapters::mcp::stdio::Transport;
 
@@ -14,16 +16,23 @@ use crate::adapters::mcp::stdio::Transport;
 pub struct ChildTransport {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// Lines read by the background reader thread below, one per
+    /// completed `read_line` on the child's stdout. A plain synchronous
+    /// read has no way to time out mid-call, so the actual reading happens
+    /// on its own thread and `read_line` just waits on this channel with a
+    /// deadline — an unresponsive MCP server blocks that thread forever,
+    /// but never blocks the agent loop past `timeout`.
+    lines: mpsc::Receiver<std::io::Result<String>>,
+    timeout: Duration,
     /// Kept alive only to be dropped (and so kill the whole process group)
     /// after `child` on `ChildTransport::drop`. See `job_object`'s docs for
     /// why `child.kill()` alone isn't enough on Windows.
     #[cfg(windows)]
-    _job: Option<crate::adapters::mcp::job_object::ProcessGroup>,
+    _job: Option<crate::adapters::job_object::ProcessGroup>,
 }
 
 impl ChildTransport {
-    pub fn spawn(program: &str, args: &[&str]) -> std::io::Result<Self> {
+    pub fn spawn(program: &str, args: &[&str], timeout: Duration) -> std::io::Result<Self> {
         // On Windows, package-manager shims like `npx` are `.cmd` batch
         // files, not real executables — `CreateProcess` (what
         // `std::process::Command` calls under the hood) can't launch those
@@ -43,7 +52,7 @@ impl ChildTransport {
         // Created before spawning so the child can be assigned to it right
         // away, before it has a chance to spawn its own children.
         #[cfg(windows)]
-        let job = crate::adapters::mcp::job_object::ProcessGroup::new().ok();
+        let job = crate::adapters::job_object::ProcessGroup::new().ok();
 
         let mut child = command
             .stdin(Stdio::piped())
@@ -67,13 +76,46 @@ impl ChildTransport {
             .take()
             .ok_or_else(|| std::io::Error::other("child process has no stdout"))?;
 
+        let (sender, lines) = mpsc::channel();
+        std::thread::spawn(move || read_lines(stdout, sender));
+
         Ok(Self {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            lines,
+            timeout,
             #[cfg(windows)]
             _job: job,
         })
+    }
+}
+
+/// Runs on its own thread for the lifetime of the child process, forwarding
+/// each complete line (skipping blank ones) to `sender`. Exits once the
+/// pipe closes, a read fails, or nobody is listening any more.
+fn read_lines(stdout: ChildStdout, sender: mpsc::Sender<std::io::Result<String>>) {
+    let mut reader = BufReader::new(stdout);
+
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line);
+
+        let message = match read {
+            Ok(0) => Err(std::io::Error::other("child process closed stdout")),
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                Ok(trimmed.to_string())
+            }
+            Err(error) => Err(error),
+        };
+
+        let is_terminal = message.is_err();
+        if sender.send(message).is_err() || is_terminal {
+            return;
+        }
     }
 }
 
@@ -84,20 +126,15 @@ impl Transport for ChildTransport {
     }
 
     fn read_line(&mut self) -> std::io::Result<String> {
-        loop {
-            let mut line = String::new();
-            let bytes_read = self.stdout.read_line(&mut line)?;
-
-            if bytes_read == 0 {
-                return Err(std::io::Error::other("child process closed stdout"));
+        match self.lines.recv_timeout(self.timeout) {
+            Ok(message) => message,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("no response from MCP server within {:?}", self.timeout),
+            )),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(std::io::Error::other("MCP server's reader thread stopped"))
             }
-
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            return Ok(trimmed.to_string());
         }
     }
 }

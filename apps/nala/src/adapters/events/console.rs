@@ -58,6 +58,12 @@ impl EventSink for ConsoleEventSink {
                     duration, output
                 )
             }
+            Event::Retrying { attempt, error } => {
+                println!("[RETRY] attempt {attempt} after error: {error}");
+            }
+            Event::Cancelled => {
+                println!("[CANCELLED] turn stopped\n");
+            }
         }
     }
 }

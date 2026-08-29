@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use crate::application::assistant::{Assistant, PLANNING_INSTRUCTIONS};
 use crate::application::assistant::{
-    AssistantError, MAX_IDENTICAL_REPEATS, MAX_TOOL_CALLS, assistant_text_message,
-    assistant_tool_call_message, system_message, tool_result_message, user_message,
+    AssistantError, assistant_text_message, assistant_tool_call_message, system_message,
+    tool_result_message, user_message,
 };
 use crate::ports::events::{Event, EventSink, TurnState};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
@@ -15,6 +15,14 @@ use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 /// empty message; a few retries with a nudge usually recovers it, but this
 /// bounds how long the loop waits on a model that's stuck saying nothing.
 const MAX_EMPTY_RESPONSES: usize = 3;
+
+/// A retryable `LlmError` is worth trying again (network hiccup, non-2xx
+/// status, ...); an `InvalidResponse` means the server answered but the
+/// body didn't parse — retrying the identical request won't change that,
+/// so it's treated as fatal.
+fn is_retryable(error: &LlmError) -> bool {
+    matches!(error, LlmError::RequestFailed(_))
+}
 
 impl<L, D, E> Assistant<L, D, E>
 where
@@ -49,15 +57,24 @@ where
         let mut identical_repeats: usize = 0;
         let mut tool_call_count: usize = 0;
         let mut empty_responses: usize = 0;
+        let mut consecutive_tool_failures: usize = 0;
 
         loop {
+            if self.cancel.is_cancelled() {
+                return Err(self.cancelled(request_start));
+            }
+
             self.set_state(TurnState::Thinking);
-            let response = self.generate(&messages)?;
+            let response = self.generate_with_retry(&messages, request_start)?;
 
             if !response.tool_calls.is_empty() {
                 self.set_state(TurnState::Executing);
 
                 for tool_call in response.tool_calls {
+                    if self.cancel.is_cancelled() {
+                        return Err(self.cancelled(request_start));
+                    }
+
                     messages.push(assistant_tool_call_message(tool_call.clone()));
 
                     if last_tool_call.as_ref() == Some(&tool_call) {
@@ -67,9 +84,10 @@ where
                         last_tool_call = Some(tool_call.clone());
                     }
 
-                    if identical_repeats >= MAX_IDENTICAL_REPEATS {
+                    if identical_repeats >= self.limits.max_identical_repeats {
+                        let limit = self.limits.max_identical_repeats;
                         return Err(self.abort(request_start, "loop detected", |_| {
-                            AssistantError::LoopDetected
+                            AssistantError::LoopDetected(limit)
                         }));
                     }
                     tool_call_count += 1;
@@ -84,8 +102,19 @@ where
                     });
 
                     let start = Instant::now();
-                    let outcome = handle_tool_call(&mut self.dispatcher, tool_call);
+                    let dispatch_result = self.dispatcher.dispatch(tool_call);
                     let duration = start.elapsed();
+
+                    let outcome = match dispatch_result {
+                        Ok(outcome) => {
+                            consecutive_tool_failures = 0;
+                            outcome
+                        }
+                        Err(error) => {
+                            consecutive_tool_failures += 1;
+                            ToolOutcome::from(format!("ERROR: {error}"))
+                        }
+                    };
 
                     self.events.emit(Event::ToolCompleted {
                         name: tool_name.clone(),
@@ -96,7 +125,16 @@ where
 
                     messages.push(tool_result_message(tool_name, outcome));
 
-                    if tool_call_count >= MAX_TOOL_CALLS {
+                    if consecutive_tool_failures >= self.limits.max_consecutive_tool_failures {
+                        let limit = self.limits.max_consecutive_tool_failures;
+                        return Err(self.abort(
+                            request_start,
+                            "too many consecutive tool failures",
+                            |_| AssistantError::TooManyConsecutiveToolFailures(limit),
+                        ));
+                    }
+
+                    if tool_call_count >= self.limits.max_tool_calls {
                         return Err(self.abort(request_start, "tool call limit exceeded", |_| {
                             AssistantError::ToolCallLimitExceeded
                         }));
@@ -129,6 +167,47 @@ where
                          natural language."
                             .to_string(),
                     ));
+                }
+            }
+        }
+    }
+
+    /// Calls the LLM, retrying a retryable failure with exponential backoff
+    /// up to `limits.max_llm_retries` times before giving up. A fatal
+    /// failure (e.g. a response that doesn't parse) or a cancellation
+    /// requested mid-backoff returns immediately instead of retrying.
+    fn generate_with_retry(
+        &mut self,
+        messages: &[Message],
+        request_start: Instant,
+    ) -> Result<LlmResponse, AssistantError<LlmError, D::Error>> {
+        let mut attempt: u32 = 0;
+
+        loop {
+            match self.generate(messages) {
+                Ok(response) => return Ok(response),
+                Err(error) => {
+                    let retryable = match &error {
+                        AssistantError::Llm(llm_error) => is_retryable(llm_error),
+                        _ => false,
+                    };
+
+                    if !retryable || attempt >= self.limits.max_llm_retries {
+                        return Err(error);
+                    }
+
+                    if self.cancel.is_cancelled() {
+                        return Err(self.cancelled(request_start));
+                    }
+
+                    self.events.emit(Event::Retrying {
+                        attempt: attempt + 1,
+                        error: error.to_string(),
+                    });
+
+                    let delay = self.limits.retry_base_delay * 2u32.pow(attempt);
+                    self.clock.sleep(delay);
+                    attempt += 1;
                 }
             }
         }
@@ -168,6 +247,16 @@ where
 
     fn set_state(&mut self, state: TurnState) {
         self.events.emit(Event::StateChanged { state });
+    }
+
+    fn cancelled(&mut self, request_start: Instant) -> AssistantError<LlmError, D::Error> {
+        let duration = request_start.elapsed();
+        self.events.emit(Event::Cancelled);
+        self.events.emit(Event::RequestFailed {
+            duration,
+            error: "cancelled".to_string(),
+        });
+        AssistantError::Cancelled
     }
 
     fn abort<F>(
@@ -243,16 +332,5 @@ where
         )));
 
         Ok(messages)
-    }
-}
-
-fn handle_tool_call<D>(dispatcher: &mut D, tool_call: ToolCall) -> ToolOutcome
-where
-    D: ToolDispatcher<Output = ToolOutcome>,
-    D::Error: std::error::Error + 'static,
-{
-    match dispatcher.dispatch(tool_call) {
-        Ok(outcome) => outcome,
-        Err(error) => ToolOutcome::from(format!("ERROR: {error}")),
     }
 }

@@ -13,6 +13,9 @@ mod fake_transport;
 #[path = "adapters/computer/windows.rs"]
 mod computer;
 
+#[path = "adapters/process/windows.rs"]
+mod process_windows;
+
 #[path = "adapters/llm/ollama.rs"]
 mod ollama;
 
@@ -21,3 +24,6 @@ mod console;
 
 #[path = "adapters/mcp/stdio.rs"]
 mod mcp_stdio;
+
+#[path = "adapters/mcp/child_process.rs"]
+mod mcp_child_process;

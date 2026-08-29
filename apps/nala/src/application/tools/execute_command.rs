@@ -1,8 +1,16 @@
+use std::time::Duration;
+
 use crate::application::tools::{Tool, ToolDefinition};
 use crate::ports::computer::{Computer, ComputerError};
 use crate::ports::process::Process;
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+/// How long a shell command may run before it's killed. Generous, because
+/// legitimate commands (`start chrome`, installers, ...) can take a while
+/// to hand back control, but bounded so a command that never returns
+/// doesn't hang the turn forever.
+pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ExecuteCommandArgs {
@@ -15,11 +23,19 @@ pub struct ExecuteCommandArgs {
 
 pub struct ExecuteCommandTool<C: Computer> {
     pub computer: C,
+    pub timeout: Duration,
 }
 
 impl<C: Computer> ExecuteCommandTool<C> {
     pub fn new(computer: C) -> Self {
-        Self { computer }
+        Self {
+            computer,
+            timeout: DEFAULT_COMMAND_TIMEOUT,
+        }
+    }
+
+    pub fn with_timeout(computer: C, timeout: Duration) -> Self {
+        Self { computer, timeout }
     }
 }
 
@@ -37,7 +53,7 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
     }
 
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let output = self.computer.execute_command(&args.command)?;
+        let output = self.computer.execute_command(&args.command, self.timeout)?;
 
         if output.trim().is_empty() {
             Ok("Command executed, no output. This confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering.".to_string())

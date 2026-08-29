@@ -62,6 +62,17 @@ pub enum Event {
         /// How many images the tool result carried (e.g. a screenshot).
         images: usize,
     },
+
+    /// A retryable LLM failure is about to be retried after a backoff
+    /// delay.
+    Retrying {
+        attempt: u32,
+        error: String,
+    },
+
+    /// The turn was stopped because cancellation was requested (e.g.
+    /// Ctrl+C) rather than because it finished or hit a limit.
+    Cancelled,
 }
 
 pub trait EventSink {

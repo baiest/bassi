@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::ports::environment::EnvironmentError;
 use crate::ports::process::Process;
 
@@ -23,6 +25,10 @@ pub trait Computer {
 
     const SYSTEM_DESCRIPTION: &'static str;
 
-    fn execute_command(&mut self, command: &str) -> Result<String, ComputerError>;
+    fn execute_command(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String, ComputerError>;
     fn get_context(&mut self) -> Result<ComputerContext, ComputerError>;
 }

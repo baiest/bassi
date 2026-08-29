@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use nala::ports::computer::{Computer, ComputerContext, ComputerError};
 use nala::ports::process::{Process, ProcessError};
 
@@ -6,7 +8,12 @@ pub struct FakeProcess;
 impl Process for FakeProcess {
     const SYSTEM_DESCRIPTION: &'static str = "This is a fake process.";
 
-    fn spawn(&mut self, _program: &str, _args: &[&str]) -> Result<String, ProcessError> {
+    fn spawn(
+        &mut self,
+        _program: &str,
+        _args: &[&str],
+        _timeout: Duration,
+    ) -> Result<String, ProcessError> {
         Ok(String::new())
     }
 }
@@ -34,7 +41,7 @@ impl Computer for FakeComputer {
 
     const SYSTEM_DESCRIPTION: &'static str = "This is a fake computer.";
 
-    fn execute_command(&mut self, name: &str) -> Result<String, ComputerError> {
+    fn execute_command(&mut self, name: &str, _timeout: Duration) -> Result<String, ComputerError> {
         if self.should_fail {
             return Err(ComputerError::CommandFailed(
                 "fake computer failed".to_string(),

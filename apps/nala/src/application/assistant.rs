@@ -1,19 +1,20 @@
+// `SystemClock` is an adapter, but it wraps nothing but `std::time` and
+// `std::thread::sleep` — no I/O, no state, no dependency on this process's
+// wiring — so `Assistant::new` can default to it directly instead of
+// forcing every caller to thread a clock through their own construction
+// code. Anything that needs a different clock (tests, mainly) overrides it
+// with `with_clock`.
+use crate::adapters::clock::system::SystemClock;
+use crate::application::loop_limits::LoopLimits;
 use crate::application::tools::registry::ToolRegistry;
 use crate::application::transcript::Transcript;
+use crate::ports::cancellation::{CancelSignal, NeverCancelled};
+use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
 use crate::ports::llm::{Llm, Message, ToolCall};
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
 pub use crate::application::transcript::MAX_HISTORY_MESSAGES;
-
-pub const MAX_TOOL_CALLS: usize = 30;
-
-/// How many times in a row the exact same tool call (name + arguments) can
-/// be requested before the turn is aborted as a loop. Multi-step flows
-/// (screenshot, click, screenshot again) legitimately call the same tool
-/// repeatedly with different arguments — only an identical call repeated
-/// back-to-back indicates the model is stuck.
-pub const MAX_IDENTICAL_REPEATS: usize = 3;
 
 pub(crate) const SYSTEM_PROMPT: &str = "<role>
 You are Nala, a computer assistant. You control the user's real computer through tools. You do not chat about actions — you perform them.
@@ -70,6 +71,9 @@ pub struct Assistant<L, D, E> {
     pub(crate) registry: ToolRegistry,
     pub(crate) transcript: Transcript,
     pub(crate) events: E,
+    pub(crate) limits: LoopLimits,
+    pub(crate) clock: Box<dyn Clock>,
+    pub(crate) cancel: Box<dyn CancelSignal>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,14 +86,16 @@ where
     Llm(#[source] L),
     #[error("tool error: {0}")]
     Tool(#[source] D),
-    #[error(
-        "loop detected: the same tool call was requested {MAX_IDENTICAL_REPEATS} times in a row"
-    )]
-    LoopDetected,
+    #[error("loop detected: the same tool call was requested {0} times in a row")]
+    LoopDetected(usize),
     #[error("tool call limit exceeded")]
     ToolCallLimitExceeded,
     #[error("the model produced neither text nor a tool call too many times in a row")]
     EmptyResponse,
+    #[error("{0} tool calls in a row failed")]
+    TooManyConsecutiveToolFailures(usize),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 impl<L, D, E> Assistant<L, D, E>
@@ -106,7 +112,25 @@ where
             registry,
             events,
             transcript: Transcript::new(system_message(SYSTEM_PROMPT.to_string())),
+            limits: LoopLimits::from_env(),
+            clock: Box::new(SystemClock::new()),
+            cancel: Box::new(NeverCancelled),
         }
+    }
+
+    pub fn with_limits(mut self, limits: LoopLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    pub fn with_cancel_signal(mut self, cancel: Box<dyn CancelSignal>) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     /// Number of persisted messages, including the system prompt.
