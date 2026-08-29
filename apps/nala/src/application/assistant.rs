@@ -16,6 +16,7 @@ use crate::ports::cancellation::{CancelSignal, NeverCancelled};
 use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
 use crate::ports::llm::{Llm, Message, ToolCall};
+use crate::ports::speech::Speech;
 use crate::ports::token_counter::TokenCounter;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
@@ -65,6 +66,7 @@ pub struct Assistant<L, D, E> {
     pub(crate) cancel: Box<dyn CancelSignal>,
     pub(crate) token_counter: Box<dyn TokenCounter>,
     pub(crate) budget: ContextBudget,
+    pub(crate) speech: Option<Box<dyn Speech>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +110,7 @@ where
             cancel: Box::new(NeverCancelled),
             token_counter: Box::new(HeuristicTokenCounter::new()),
             budget: ContextBudget::from_env(),
+            speech: None,
         }
     }
 
@@ -118,6 +121,11 @@ where
 
     pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    pub fn with_speech(mut self, speech: Box<dyn Speech>) -> Self {
+        self.speech = Some(speech);
         self
     }
 

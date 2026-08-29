@@ -32,6 +32,7 @@ use crate::{
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
+    fake_speech::SpySpeech,
 };
 use nala::ports::mcp::McpToolResult;
 
@@ -813,4 +814,30 @@ fn continues_without_a_plan_when_the_planning_call_fails() {
     let result = assistant.process("pon musica en spotify");
 
     assert_eq!(result.unwrap(), "done");
+}
+
+#[test]
+fn speaks_the_final_answer() {
+    let llm = AlwaysRepliesTextLlm::new();
+    let computer = FakeComputer::new();
+    let speech = SpySpeech::new();
+    let spy = speech.clone();
+
+    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
+    let result = assistant.process("hello");
+
+    assert_eq!(result.unwrap(), "ok");
+    assert_eq!(spy.spoken(), vec!["ok".to_string()]);
+}
+
+#[test]
+fn speech_failure_does_not_break_the_turn() {
+    let llm = AlwaysRepliesTextLlm::new();
+    let computer = FakeComputer::new();
+    let speech = SpySpeech::failing();
+
+    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
+    let result = assistant.process("hola");
+
+    assert_eq!(result.unwrap(), "ok");
 }

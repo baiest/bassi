@@ -3,11 +3,15 @@ use nala::adapters::cancellation::console::CtrlCCancelSignal;
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::environment::system::SystemEnvironment;
 use nala::adapters::events::console::ConsoleEventSink;
+use nala::adapters::events::speaking::SpeakingEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::mcp::child_process::ChildTransport;
 use nala::adapters::mcp::stdio::StdioMcpClient;
 use nala::adapters::process::windows::Windows as WindowsProcess;
+use nala::adapters::speech::async_speech::AsyncSpeech;
+use nala::adapters::speech::windows_sapi::WindowsSapiSpeech;
 use nala::application::assistant::Assistant;
+use nala::application::narration::TemplateNarrator;
 use nala::application::tools::Tool;
 use nala::application::tools::computer_use::{ComputerUseToolset, DEFAULT_ALLOWLIST};
 use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
@@ -15,9 +19,31 @@ use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::ping::PingTool;
 use nala::application::tools::registry::ToolRegistry;
 use nala::cli::prompt::MultilineReader;
+use nala::ports::speech::{Speech, SpeechError};
 
 type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
 type McpClientType = StdioMcpClient<ChildTransport>;
+
+/// No-op `Speech` backend, used when `NALA_TTS=off` (or on a non-Windows
+/// build). Keeps `AsyncSpeech`/`SpeakingEventSink` wired unconditionally —
+/// narration and the final answer still flow through the same queue, they
+/// just produce no audio — instead of branching the event sink's type on an
+/// env var only known at runtime.
+struct NullSpeech;
+
+impl Speech for NullSpeech {
+    fn say(&self, _text: &str) -> Result<(), SpeechError> {
+        Ok(())
+    }
+}
+
+fn speech_backend() -> Box<dyn Speech + Send> {
+    if std::env::var("NALA_TTS").as_deref() != Ok("off") {
+        Box::new(WindowsSapiSpeech::new())
+    } else {
+        Box::new(NullSpeech)
+    }
+}
 
 /// How long to wait for a response to a single MCP request (e.g. a
 /// screenshot or a click) before giving up on it. Generous because
@@ -66,10 +92,12 @@ fn main() {
     let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "gemma4:e4b")
         .expect("Failed to create Ollama client");
 
-    let events = ConsoleEventSink;
+    let speech = AsyncSpeech::new(speech_backend());
+    let events = SpeakingEventSink::new(ConsoleEventSink, TemplateNarrator::new(), speech.clone());
 
     #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut assistant = Assistant::new(llm, dispatcher, registry, events);
+    let mut assistant =
+        Assistant::new(llm, dispatcher, registry, events).with_speech(Box::new(speech.clone()));
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
     // handles it) cancels the turn instead of killing the process. Windows
@@ -94,8 +122,11 @@ fn main() {
 
     let mut reader = MultilineReader::new();
 
+    let greeting = "Hola, en que te puedo ayudar?";
+    println!("{greeting}");
+    let _ = speech.say(greeting);
+
     loop {
-        println!("Hola, en que te puedo ayudar?");
         println!(
             "(puedes escribir/pegar varias lineas y usar flechas/backspace entre ellas; Ctrl+Enter envia)"
         );
@@ -117,6 +148,8 @@ fn main() {
             Err(e) => eprintln!("Error: {e}"),
         }
     }
+
+    speech.flush();
 }
 
 fn connect_computer_use() -> Result<ComputerUseToolset<McpClientType>, String> {
