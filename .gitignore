@@ -6,3 +6,10 @@ coverage.out
 # Python project, not part of this repo - it ended up cloned here by
 # accident during setup and is kept ignored until it's moved out.
 /chatterbox-tts-api
+
+# Piper binary and voice models: downloaded by scripts/piper-setup.ps1,
+# not checked in (a binary plus ~60 MB of model weights don't belong in
+# the repo).
+/tools/piper/
+/data/voices/piper/*.onnx
+/data/voices/piper/*.onnx.json

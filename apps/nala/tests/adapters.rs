@@ -55,6 +55,12 @@ mod rodio_player;
 #[path = "adapters/speech/chatterbox_supervisor.rs"]
 mod chatterbox_supervisor;
 
+#[path = "adapters/speech/piper_config.rs"]
+mod piper_config;
+
+#[path = "adapters/speech/piper.rs"]
+mod piper;
+
 #[path = "adapters/mcp/stdio.rs"]
 mod mcp_stdio;
 

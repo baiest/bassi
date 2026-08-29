@@ -42,7 +42,12 @@ fi
 # past its pure `decide` function (covered by chatterbox_supervisor.rs),
 # it's Command::spawn + a real HTTP health check against a live Chatterbox
 # server, which isn't available in CI.
-IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object)|speech[/\\]chatterbox[/\\]supervisor)\.rs$|cli[/\\]prompt\.rs$'
+# adapters/speech/piper/speech.rs is excluded for the same reason as
+# supervisor.rs: past its pure `build_args`/`normalize_text` helpers
+# (covered by piper.rs), the rest is Command::spawn + reading a real
+# Piper process's stdout/exit status, which needs a real Piper install
+# that isn't available in CI.
+IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object)|speech[/\\](chatterbox[/\\]supervisor|piper[/\\]speech))\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 
