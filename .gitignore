@@ -1,3 +1,8 @@
 /target
 lcov.info
 coverage.out
+
+# The Chatterbox TTS server (travisvn/chatterbox-tts-api) is a separate
+# Python project, not part of this repo - it ended up cloned here by
+# accident during setup and is kept ignored until it's moved out.
+/chatterbox-tts-api
