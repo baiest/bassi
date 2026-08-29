@@ -13,6 +13,8 @@ use nala::adapters::speech::async_speech::AsyncSpeech;
 use nala::adapters::speech::chatterbox::HttpChatterbox;
 use nala::adapters::speech::chatterbox::config::ChatterboxConfig;
 use nala::adapters::speech::chatterbox::supervisor::ChatterboxSupervisor;
+use nala::adapters::speech::piper::PiperSpeech;
+use nala::adapters::speech::piper::config::PiperConfig;
 use nala::adapters::speech::streaming_speech::StreamingSpeech;
 use nala::adapters::speech::windows_sapi::WindowsSapiSpeech;
 use nala::application::assistant::Assistant;
@@ -42,19 +44,26 @@ impl Speech for NullSpeech {
     }
 }
 
-/// Resolves the TTS backend from `NALA_TTS` (`chatterbox` | `sapi` | `off`,
-/// default `chatterbox`). Also returns the `ChatterboxSupervisor` when one
-/// was started, so `main` can keep it alive - dropping it kills the server
-/// process it spawned.
+/// Resolves the TTS backend from `NALA_TTS` (`piper` | `chatterbox` |
+/// `sapi` | `off`, default `piper`). Also returns the `ChatterboxSupervisor`
+/// when one was started, so `main` can keep it alive - dropping it kills
+/// the server process it spawned. Piper has no supervisor: it's a
+/// per-utterance child process, nothing to keep alive between turns.
 ///
-/// Chatterbox is never allowed to leave Nala mute: any failure building it
-/// (missing `reference.wav`, server unreachable, no audio device, ...) logs
-/// a warning and falls back to Windows SAPI instead of propagating.
+/// Piper is the default because it answers about as fast as SAPI while
+/// sounding noticeably more natural - Chatterbox's cloned voice is more
+/// natural still, but synthesis is CPU-bound and much slower, so it stays
+/// opt-in via `NALA_TTS=chatterbox`.
+///
+/// Whichever backend is selected is never allowed to leave Nala mute: any
+/// failure building it (missing binary/model/reference, server
+/// unreachable, no audio device, ...) logs a warning and falls back to
+/// Windows SAPI instead of propagating.
 fn speech_backend() -> (Box<dyn Speech + Send>, Option<ChatterboxSupervisor>) {
     match std::env::var("NALA_TTS").as_deref() {
         Ok("off") => (Box::new(NullSpeech), None),
         Ok("sapi") => (Box::new(WindowsSapiSpeech::new()), None),
-        _ => match build_chatterbox() {
+        Ok("chatterbox") => match build_chatterbox() {
             Ok((speech, supervisor)) => (speech, Some(supervisor)),
             Err(error) => {
                 eprintln!(
@@ -63,7 +72,27 @@ fn speech_backend() -> (Box<dyn Speech + Send>, Option<ChatterboxSupervisor>) {
                 (Box::new(WindowsSapiSpeech::new()), None)
             }
         },
+        _ => match build_piper() {
+            Ok(speech) => (speech, None),
+            Err(error) => {
+                eprintln!(
+                    "Warning: Piper TTS unavailable ({error}); falling back to Windows SAPI."
+                );
+                (Box::new(WindowsSapiSpeech::new()), None)
+            }
+        },
     }
+}
+
+fn build_piper() -> Result<Box<dyn Speech + Send>, SpeechError> {
+    let config = PiperConfig::from_env()?;
+    let synth = PiperSpeech::new(config);
+    let player = RodioPlayer::new()?;
+
+    Ok(Box::new(StreamingSpeech::new(
+        Box::new(synth),
+        Box::new(player),
+    )))
 }
 
 fn build_chatterbox() -> Result<(Box<dyn Speech + Send>, ChatterboxSupervisor), SpeechError> {
