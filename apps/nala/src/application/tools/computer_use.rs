@@ -16,6 +16,12 @@ pub const DEFAULT_ALLOWLIST: &[&str] = &[
     "list_windows",
 ];
 
+/// The subset of `DEFAULT_ALLOWLIST` that changes what's on screen, as
+/// opposed to only reading it. Drives two things: `ToolOutcome::mutated`
+/// (via `is_mutating`, from the dispatcher) and the auto-verification
+/// screenshot `call` attaches below.
+const MUTATING_TOOLS: &[&str] = &["left_click", "double_click", "type", "key", "scroll"];
+
 /// A dynamically-discovered set of MCP tools, filtered down to an allowlist.
 /// Unlike `Tool` implementations (one const `NAME`, one typed `Args`), the
 /// set of tools and their schemas are only known once connected to the MCP
@@ -56,11 +62,35 @@ impl<M: McpClient> ComputerUseToolset<M> {
         self.allowed.iter().any(|allowed| allowed == name)
     }
 
+    pub fn is_mutating(name: &str) -> bool {
+        MUTATING_TOOLS.contains(&name)
+    }
+
     pub fn call(&mut self, name: &str, arguments: &str) -> Result<McpToolResult, McpError> {
         let arguments: serde_json::Value = serde_json::from_str(arguments)
             .map_err(|error| McpError::Protocol(error.to_string()))?;
 
-        self.client.call_tool(name, arguments)
+        let mut result = self.client.call_tool(name, arguments)?;
+
+        // A mutating action (click, type, key, scroll) gets a screenshot
+        // attached to its own result automatically, so the model sees the
+        // effect of what it just did without having to remember to ask —
+        // and so there's real evidence to check even if it doesn't look
+        // closely. Best-effort: if the verification screenshot itself
+        // fails, or "screenshot" isn't in this toolset's allowlist, the
+        // original action's result still stands.
+        if Self::is_mutating(name)
+            && self.handles("screenshot")
+            && let Ok(verification) = self.client.call_tool("screenshot", serde_json::json!({}))
+        {
+            result.images.extend(verification.images);
+            result.text = format!(
+                "{}\n\n[Auto-verification screenshot attached — check it before answering.]",
+                result.text
+            );
+        }
+
+        Ok(result)
     }
 
     /// Exposed for tests, to inspect what was sent to the MCP client.

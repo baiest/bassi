@@ -89,10 +89,34 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                             ToolDispatcherError::ToolErrorParsingArguments(Box::new(error))
                         })?;
 
-                    return tool
+                    // Best-effort: a `before`/`after` snapshot of the
+                    // computer's state, so the model doesn't have to take
+                    // our word for it that the command changed anything —
+                    // a failure to read either snapshot just means running
+                    // without that evidence, not a failed command.
+                    let before = tool.context().ok();
+
+                    let output = tool
                         .execute(args)
-                        .map(ToolOutcome::from)
-                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
+
+                    let after = tool.context().ok();
+
+                    let text = match (before, after) {
+                        (Some(before), Some(after)) if before != after => {
+                            format!("{output}\n\nState before:\n{before}\n\nState after:\n{after}")
+                        }
+                        (Some(_), Some(after)) => {
+                            format!("{output}\n\nState unchanged:\n{after}")
+                        }
+                        _ => output,
+                    };
+
+                    return Ok(ToolOutcome {
+                        text,
+                        images: Vec::new(),
+                        mutated: ExecuteCommandTool::<C>::MUTATING,
+                    });
                 }
                 Tools::Ping(tool) if tool_call.name == PingTool::NAME => {
                     PingTool::parse_arguments(&tool_call.arguments).map_err(|error| {
@@ -105,6 +129,8 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
                 Tools::ComputerUse(toolset) if toolset.handles(&tool_call.name) => {
+                    let mutated = ComputerUseToolset::<M>::is_mutating(&tool_call.name);
+
                     let result = toolset
                         .call(&tool_call.name, &tool_call.arguments)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
@@ -112,6 +138,7 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                     return Ok(ToolOutcome {
                         text: result.text,
                         images: result.images,
+                        mutated,
                     });
                 }
                 _ => continue,

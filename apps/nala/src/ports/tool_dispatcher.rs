@@ -7,6 +7,13 @@ use crate::ports::llm::ToolCall;
 pub struct ToolOutcome {
     pub text: String,
     pub images: Vec<String>,
+    /// Whether this call changed something on the user's computer (as
+    /// opposed to only reading state, like `screenshot` or `list_windows`).
+    /// Set by the dispatcher, from the `Tool::MUTATING` of whichever tool
+    /// ran. The agent loop uses this to require some evidence the effect
+    /// was checked before the turn is allowed to end — see
+    /// `agent_loop.rs`'s verification gate.
+    pub mutated: bool,
 }
 
 impl From<String> for ToolOutcome {
@@ -14,6 +21,7 @@ impl From<String> for ToolOutcome {
         Self {
             text,
             images: Vec::new(),
+            mutated: false,
         }
     }
 }

@@ -92,6 +92,9 @@ impl EventSink for ConsoleEventSink {
             Event::TranscriptCompacted { turns_compacted } => {
                 println!("[BUDGET] compacted {turns_compacted} old turn(s) into a summary\n");
             }
+            Event::AnsweredUnverified => {
+                println!("[VERIFY] answered without checking the last action\n");
+            }
         }
     }
 }
