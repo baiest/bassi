@@ -216,6 +216,15 @@ where
                         self.budget.available_tokens(),
                     );
 
+                    if let Some(speech) = &self.speech
+                        && let Err(error) = speech.say(&text)
+                    {
+                        self.events.emit(Event::RequestFailed {
+                            duration: request_start.elapsed(),
+                            error: error.to_string(),
+                        });
+                    }
+
                     let duration = request_start.elapsed();
                     self.events.emit(Event::RequestCompleted { duration });
 

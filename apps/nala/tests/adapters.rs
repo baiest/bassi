@@ -10,6 +10,12 @@ mod http_stub;
 #[path = "common/fake_transport.rs"]
 mod fake_transport;
 
+#[path = "common/fake_speech.rs"]
+mod fake_speech;
+
+#[path = "common/fake_events.rs"]
+mod fake_events;
+
 #[path = "adapters/computer/windows.rs"]
 mod computer;
 
@@ -24,6 +30,12 @@ mod ollama;
 
 #[path = "adapters/events/console.rs"]
 mod console;
+
+#[path = "adapters/events/speaking.rs"]
+mod speaking;
+
+#[path = "adapters/speech/async_speech.rs"]
+mod async_speech;
 
 #[path = "adapters/mcp/stdio.rs"]
 mod mcp_stdio;
