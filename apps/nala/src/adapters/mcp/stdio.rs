@@ -47,21 +47,31 @@ impl<T: Transport> StdioMcpClient<T> {
             .send_line(&line)
             .map_err(|error| McpError::Transport(error.to_string()))?;
 
-        let response_line = self
-            .transport
-            .read_line()
-            .map_err(|error| McpError::Transport(error.to_string()))?;
+        // The server can interleave asynchronous notifications (no "id",
+        // e.g. a resource-updated notice after a screenshot) or responses
+        // to other in-flight requests between our request and its actual
+        // response. Keep reading until a message carries this request's id.
+        loop {
+            let response_line = self
+                .transport
+                .read_line()
+                .map_err(|error| McpError::Transport(error.to_string()))?;
 
-        let response: JsonRpcResponse = serde_json::from_str(&response_line)
-            .map_err(|error| McpError::Protocol(error.to_string()))?;
+            let response: JsonRpcResponse = serde_json::from_str(&response_line)
+                .map_err(|error| McpError::Protocol(error.to_string()))?;
 
-        if let Some(error) = response.error {
-            return Err(McpError::Protocol(error.message));
+            if response.id != Some(id) {
+                continue;
+            }
+
+            if let Some(error) = response.error {
+                return Err(McpError::Protocol(error.message));
+            }
+
+            return response
+                .result
+                .ok_or_else(|| McpError::Protocol("response had no result".to_string()));
         }
-
-        response
-            .result
-            .ok_or_else(|| McpError::Protocol("response had no result".to_string()))
     }
 }
 
@@ -120,7 +130,11 @@ impl<T: Transport> McpClient for StdioMcpClient<T> {
 
 #[derive(Deserialize)]
 struct JsonRpcResponse {
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
     result: Option<Value>,
+    #[serde(default)]
     error: Option<JsonRpcError>,
 }
 
