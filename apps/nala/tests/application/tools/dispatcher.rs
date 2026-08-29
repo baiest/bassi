@@ -73,7 +73,7 @@ fn dispatches_to_the_matching_tool_among_several() {
             .dispatch(execute_call)
             .unwrap()
             .text
-            .starts_with("SUCCESS")
+            .starts_with("Command executed")
     );
 }
 

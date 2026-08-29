@@ -22,7 +22,7 @@ fn executes_command() {
 }
 
 #[test]
-fn returns_explicit_success_when_command_succeeds_with_no_output() {
+fn reports_the_command_ran_unverified_when_there_is_no_output() {
     let computer = FakeComputer::new();
     let mut tool: ExecuteCommandTool<FakeComputer> = ExecuteCommandTool::new(computer);
 
@@ -32,11 +32,12 @@ fn returns_explicit_success_when_command_succeeds_with_no_output() {
 
     let result = tool.execute(args).expect("expected success");
 
-    assert!(result.starts_with("SUCCESS"));
+    assert!(result.starts_with("Command executed"));
+    assert!(result.contains("does not confirm"));
 }
 
 #[test]
-fn returns_explicit_success_when_command_succeeds_with_output() {
+fn reports_the_command_ran_unverified_with_its_output() {
     let mut computer = FakeComputer::new();
     computer.output = "some stdout".to_string();
     let mut tool: ExecuteCommandTool<FakeComputer> = ExecuteCommandTool::new(computer);
@@ -47,7 +48,7 @@ fn returns_explicit_success_when_command_succeeds_with_output() {
 
     let result = tool.execute(args).expect("expected success");
 
-    assert!(result.starts_with("SUCCESS"));
+    assert!(result.starts_with("Command executed"));
     assert!(result.contains("some stdout"));
 }
 
