@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::application::tools::registry::ToolRegistry;
 use crate::ports::events::{Event, EventSink};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
+use crate::ports::tool::ToolDefinition;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
 pub const MAX_TOOL_CALLS: usize = 30;
@@ -41,6 +42,8 @@ When you have tools to see and control the screen (e.g. screenshot, click, type,
 5. Repeat until the task is done, then answer in natural language.
 Give click coordinates as absolute pixel positions based on the most recent screenshot. After opening an application, wait for it to load before interacting with it.
 
+You will see a Plan message before you start: a short numbered plan you generated for this request. Follow it, adjusting on the fly as tool results come in — it's a starting point, not a script to repeat verbatim if reality doesn't match it.
+
 Opening a search results page is not the same as completing the request. If the user asked for a specific item (e.g. \"play this video\", \"open this file\"), you must look at the screen, pick the actual matching result, and act on it (click, open, play) before the task is done — do not stop at the search step.
 
 Example — user asks \"play a stand-up comedy video on youtube\":
@@ -50,6 +53,10 @@ Example — user asks \"play a stand-up comedy video on youtube\":
 4. screenshot: confirm the video is now playing (not still on the results list).
 5. Only now answer the user in natural language, naming the video you played.
 If step 4's screenshot still shows the results list, click failed or missed — screenshot again, re-read the coordinates, and retry the click. Never end the turn on step 1 or 2.";
+
+const PLANNING_INSTRUCTIONS: &str = "Before doing anything, write a short numbered plan for how you will accomplish the user's request, using the tools listed below and the computer context above. Think about which application or tool applies, whether you need to search for something, what specific target you need to find and act on, and how you'll confirm you actually succeeded (not just attempted the first step).
+
+Respond with ONLY the plan as plain numbered text. Do not call any tool yet — this message has no tools available on purpose, so calling one is impossible; just describe the steps.";
 
 pub struct Assistant<L, D, E> {
     llm: L,
@@ -108,6 +115,11 @@ where
             .map(|message| message.content.as_str())
     }
 
+    /// The event sink, for inspecting what was emitted (tests only).
+    pub fn events(&self) -> &E {
+        &self.events
+    }
+
     pub fn process(&mut self, input: &str) -> Result<String, AssistantError<LlmError, D::Error>> {
         let request_start = Instant::now();
 
@@ -116,14 +128,27 @@ where
         self.push_history(user_message(input));
 
         let mut messages = self.build_prompt_messages()?;
-        let tools = self.registry.definitions();
+        // Cloned rather than borrowed from `self.registry`, so `tools` doesn't
+        // keep an immutable borrow of `self` alive across the `&mut self`
+        // calls below (`build_plan`, `self.llm.generate`, ...).
+        let tool_definitions: Vec<ToolDefinition> =
+            self.registry.definitions().into_iter().cloned().collect();
+        let tools: Vec<&ToolDefinition> = tool_definitions.iter().collect();
+
+        if let Some(plan) = self.build_plan(&messages, &tools) {
+            self.events.emit(Event::PlanCreated { plan: plan.clone() });
+            messages.push(assistant_text_message(format!("Plan:\n{plan}")));
+        }
 
         let mut last_tool_call: Option<ToolCall> = None;
         let mut identical_repeats: usize = 0;
         let mut tool_call_count: usize = 0;
 
         loop {
-            self.events.emit(Event::LlmStarted);
+            let outgoing_images: usize = messages.iter().map(|message| message.images.len()).sum();
+            self.events.emit(Event::LlmStarted {
+                images: outgoing_images,
+            });
 
             let start = Instant::now();
             let response = self.llm.generate(&messages, &tools);
@@ -187,6 +212,7 @@ where
                         name: tool_name.clone(),
                         duration,
                         output: outcome.text.clone(),
+                        images: outcome.images.len(),
                     });
 
                     messages.push(tool_result_message(tool_name, outcome));
@@ -212,6 +238,42 @@ where
                     break Ok(text);
                 }
             }
+        }
+    }
+
+    /// Asks the model for a short step-by-step plan before it does anything,
+    /// so a multi-step task (open an app, find a specific item, act on it)
+    /// has an explicit target to follow instead of being decided one tool
+    /// call at a time with no larger goal in view.
+    ///
+    /// Tools are deliberately withheld from this call (an empty slice, not
+    /// `tools`) — a text-summarized list is included in the prompt instead
+    /// — so a tool-eager model can't skip straight to acting instead of
+    /// planning. A failure here (network error, etc.) isn't fatal to the
+    /// request: it just means proceeding without a plan.
+    fn build_plan(&mut self, messages: &[Message], tools: &[&ToolDefinition]) -> Option<String> {
+        let tool_summary: String = tools
+            .iter()
+            .map(|tool| format!("- {}: {}", tool.name, tool.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let mut planning_messages = messages.to_vec();
+        planning_messages.push(system_message(format!(
+            "Available tools:\n{tool_summary}\n\n{PLANNING_INSTRUCTIONS}"
+        )));
+
+        self.events.emit(Event::LlmStarted { images: 0 });
+        let start = Instant::now();
+        let response = self.llm.generate(&planning_messages, &[]);
+        let duration = start.elapsed();
+
+        let response = response.ok()?;
+        self.events.emit(Event::LlmCompleted { duration });
+
+        match response {
+            LlmResponse::Text(plan) if !plan.trim().is_empty() => Some(plan),
+            _ => None,
         }
     }
 

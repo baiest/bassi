@@ -4,21 +4,28 @@ use nala::{
         assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
         tools::{
             Tool,
+            computer_use::ComputerUseToolset,
             dispatcher::{ToolDispatcher, Tools},
             execute_command::ExecuteCommandTool,
             registry::ToolRegistry,
         },
     },
+    ports::events::Event,
 };
 
 use crate::{
     fake_computer::FakeComputer,
+    fake_events::RecordingEventSink,
     fake_llm::{
-        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, ChainsDistinctToolCallsThenAnswersLlm,
-        EchoesLastMessageLlm, FailingLlm, FakeLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
+        AlwaysCallsToolLlm, AlwaysRepliesTextLlm, CallsScreenshotThenAnswersLlm,
+        ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm, FailingLlm,
+        FailsPlanningThenExecutesLlm, FakeLlm, PlansThenExecutesLlm,
+        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm, ResolvesInOneToolCallLlm,
+        RetriesSameToolWithDifferentArgsLlm,
     },
+    fake_mcp::FakeMcpClient,
 };
+use nala::ports::mcp::McpToolResult;
 
 fn registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -209,4 +216,119 @@ fn keeps_only_the_last_messages_in_history() {
         .system_prompt()
         .expect("system prompt should survive pruning");
     assert!(system_prompt.starts_with("You are Nala, a computer assistant."));
+}
+
+#[test]
+fn emits_events_showing_images_reached_the_tool_result_and_the_next_llm_call() {
+    let mcp = FakeMcpClient::new()
+        .with_tool("screenshot", "Take a screenshot")
+        .returning(McpToolResult {
+            text: "here is the screen".to_string(),
+            images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+        });
+    let toolset = ComputerUseToolset::connect(mcp, &["screenshot"]).unwrap();
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
+        FakeComputer::new(),
+    )));
+    dispatcher.register(Tools::ComputerUse(toolset));
+
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        CallsScreenshotThenAnswersLlm::new(),
+        dispatcher,
+        registry(),
+        events,
+    );
+
+    let result = assistant.process("take a screenshot");
+    assert_eq!(result.unwrap(), "done");
+
+    let events = assistant.events().events.as_slice();
+
+    let tool_completed_images = events.iter().find_map(|event| match event {
+        Event::ToolCompleted { images, .. } => Some(*images),
+        _ => None,
+    });
+    assert_eq!(
+        tool_completed_images,
+        Some(1),
+        "expected the screenshot's image to be reported on ToolCompleted"
+    );
+
+    let llm_started_image_counts: Vec<usize> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::LlmStarted { images } => Some(*images),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        llm_started_image_counts,
+        vec![0, 0, 1],
+        "the planning call, then the screenshot call, then the call after \
+         it should report the screenshot's image"
+    );
+}
+
+#[test]
+fn generates_a_plan_before_executing_and_keeps_it_in_context() {
+    let llm = PlansThenExecutesLlm::new("1. abre spotify\n2. dale play a la cancion");
+    let messages_on_execute_call = llm.messages_on_execute_call.clone();
+
+    let mut assistant = assistant_with(llm, FakeComputer::new());
+
+    let result = assistant.process("pon musica en spotify");
+
+    assert_eq!(result.unwrap(), "done");
+
+    let captured = messages_on_execute_call.borrow();
+    let captured = captured
+        .as_ref()
+        .expect("the execute-step call should have happened");
+
+    assert!(
+        captured
+            .iter()
+            .any(|message| message.content.contains("abre spotify")),
+        "expected the generated plan to be present in context for the execute call"
+    );
+}
+
+#[test]
+fn emits_plan_created_with_the_generated_plan() {
+    let llm = PlansThenExecutesLlm::new("1. abre spotify\n2. dale play a la cancion");
+    let tool = ExecuteCommandTool::new(FakeComputer::new());
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(llm, dispatcher, registry(), events);
+
+    assistant.process("pon musica en spotify").unwrap();
+
+    let plan = assistant
+        .events()
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::PlanCreated { plan } => Some(plan.clone()),
+            _ => None,
+        });
+
+    assert_eq!(
+        plan,
+        Some("1. abre spotify\n2. dale play a la cancion".to_string())
+    );
+}
+
+#[test]
+fn continues_without_a_plan_when_the_planning_call_fails() {
+    let mut assistant = assistant_with(FailsPlanningThenExecutesLlm::new(), FakeComputer::new());
+
+    let result = assistant.process("pon musica en spotify");
+
+    assert_eq!(result.unwrap(), "done");
 }

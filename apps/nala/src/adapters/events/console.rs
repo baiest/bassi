@@ -15,8 +15,15 @@ impl EventSink for ConsoleEventSink {
             Event::RequestFailed { duration, error } => {
                 println!("[REQUEST] failed in {:?}: {}\n", duration, error);
             }
-            Event::LlmStarted => {
-                println!("[LLM] started");
+            Event::PlanCreated { plan } => {
+                println!("[PLAN]\n{plan}\n");
+            }
+            Event::LlmStarted { images } => {
+                if images > 0 {
+                    println!("[LLM] started (with {images} image(s) attached)");
+                } else {
+                    println!("[LLM] started");
+                }
             }
             Event::LlmCompleted { duration } => {
                 println!("[LLM] completed in {:?}\n", duration);
@@ -28,9 +35,15 @@ impl EventSink for ConsoleEventSink {
                 name,
                 duration,
                 output,
+                images,
             } => {
+                let images_note = if images > 0 {
+                    format!(" ({images} image(s))")
+                } else {
+                    String::new()
+                };
                 println!(
-                    "[TOOL] [{name}] completed in {:?}: {:?}\n",
+                    "[TOOL] [{name}] completed in {:?}{images_note}: {:?}\n",
                     duration, output
                 )
             }
