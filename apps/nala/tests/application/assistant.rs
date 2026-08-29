@@ -28,8 +28,8 @@ use crate::{
         FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
         FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, MutatesThenAnswersImmediatelyLlm,
         MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
-        RetriesSameToolWithDifferentArgsLlm,
+        RepeatsSameToolCallLlm, RepliesWithLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm,
+        ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
     fake_speech::SpySpeech,
@@ -828,6 +828,23 @@ fn speaks_the_final_answer() {
 
     assert_eq!(result.unwrap(), "ok");
     assert_eq!(spy.spoken(), vec!["ok".to_string()]);
+}
+
+#[test]
+fn speaks_a_multi_sentence_answer_one_sentence_at_a_time() {
+    let llm = RepliesWithLlm::new("Hola. Como estas?");
+    let computer = FakeComputer::new();
+    let speech = SpySpeech::new();
+    let spy = speech.clone();
+
+    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
+    let result = assistant.process("hello");
+
+    assert_eq!(result.unwrap(), "Hola. Como estas?");
+    assert_eq!(
+        spy.spoken(),
+        vec!["Hola.".to_string(), "Como estas?".to_string()]
+    );
 }
 
 #[test]

@@ -221,13 +221,21 @@ where
                         self.budget.available_tokens(),
                     );
 
-                    if let Some(speech) = &self.speech
-                        && let Err(error) = speech.say(&text)
-                    {
-                        self.events.emit(Event::RequestFailed {
-                            duration: request_start.elapsed(),
-                            error: error.to_string(),
-                        });
+                    if let Some(speech) = &self.speech {
+                        // Speak one sentence at a time rather than the whole
+                        // answer in one `say` call: `AsyncSpeech` queues
+                        // each piece separately, so the first sentence
+                        // starts playing as soon as it's synthesized
+                        // instead of waiting for the entire answer.
+                        for sentence in crate::application::sentences::split_into_sentences(&text) {
+                            if let Err(error) = speech.say(&sentence) {
+                                self.events.emit(Event::RequestFailed {
+                                    duration: request_start.elapsed(),
+                                    error: error.to_string(),
+                                });
+                                break;
+                            }
+                        }
                     }
 
                     let duration = request_start.elapsed();

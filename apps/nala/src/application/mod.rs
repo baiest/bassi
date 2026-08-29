@@ -3,5 +3,6 @@ pub mod assistant;
 pub mod context_budget;
 pub mod loop_limits;
 pub mod narration;
+pub mod sentences;
 pub mod tools;
 pub mod transcript;
