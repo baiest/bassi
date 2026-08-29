@@ -4,7 +4,7 @@ use std::thread;
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
-use crate::adapters::speech::chatterbox::{PcmStream, PlayPcmStream};
+use crate::adapters::speech::pcm::{PcmStream, PlayPcmStream};
 use crate::ports::speech::SpeechError;
 
 /// Plays streamed PCM audio through the system's default output device. The
