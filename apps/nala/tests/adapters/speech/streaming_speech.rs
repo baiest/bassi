@@ -1,5 +1,5 @@
-use nala::adapters::speech::chatterbox::speech::ChatterboxSpeech;
-use nala::adapters::speech::chatterbox::{PcmStream, PlayPcmStream, StreamSynthesizeSpeech};
+use nala::adapters::speech::pcm::{PcmStream, PlayPcmStream, StreamSynthesizeSpeech};
+use nala::adapters::speech::streaming_speech::StreamingSpeech;
 use nala::ports::speech::{Speech, SpeechError};
 
 use crate::fake_tts::{FakeSynth, SpyPlayer};
@@ -25,7 +25,7 @@ fn speech_sends_text_to_synthesizer_and_plays_returned_samples() {
     let synth = Arc::new(FakeSynth::returning(vec![9, 9, 9]));
     let player = Arc::new(SpyPlayer::new());
 
-    let speech = ChatterboxSpeech::new(
+    let speech = StreamingSpeech::new(
         Box::new(SharedSynth(synth.clone())),
         Box::new(SharedPlayer(player.clone())),
     );
@@ -50,7 +50,7 @@ fn synthesis_failure_is_not_played() {
     let player = Arc::new(SpyPlayer::new());
     let synth = FakeSynth::failing(SpeechError::Unavailable("down".into()));
 
-    let speech = ChatterboxSpeech::new(Box::new(synth), Box::new(SharedPlayer(player.clone())));
+    let speech = StreamingSpeech::new(Box::new(synth), Box::new(SharedPlayer(player.clone())));
 
     let result = speech.say("no deberia sonar");
 
@@ -63,7 +63,7 @@ fn playback_failure_propagates() {
     let synth = FakeSynth::returning(vec![1]);
     let player = SpyPlayer::failing();
 
-    let speech = ChatterboxSpeech::new(Box::new(synth), Box::new(player));
+    let speech = StreamingSpeech::new(Box::new(synth), Box::new(player));
 
     let result = speech.say("texto");
 
