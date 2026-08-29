@@ -198,9 +198,14 @@ where
                         messages.push(system_message(
                             "You performed an action that changes state \
                              without confirming the result afterwards. \
-                             Verify the outcome (e.g. look at the screenshot \
-                             or state already attached to that tool's \
-                             result, or take a new one) before answering."
+                             Verify using the evidence already attached to \
+                             that tool's result — a screenshot for a \
+                             click/type/key/scroll, or the before/after \
+                             system state for a command. That evidence is \
+                             already enough in most cases; do NOT take a \
+                             new screenshot unless the last action was a \
+                             screen interaction and the attached evidence \
+                             genuinely does not show the outcome."
                                 .to_string(),
                         ));
                         continue;
