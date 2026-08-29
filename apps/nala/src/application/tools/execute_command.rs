@@ -42,7 +42,9 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
         if output.trim().is_empty() {
             Ok("Command executed, no output. This confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering.".to_string())
         } else {
-            Ok(format!("Command executed. Output: {output}\n\nThis confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering."))
+            Ok(format!(
+                "Command executed. Output: {output}\n\nThis confirms the command ran; it does not confirm the requested outcome happened on screen. Verify with a screenshot before answering."
+            ))
         }
     }
 
