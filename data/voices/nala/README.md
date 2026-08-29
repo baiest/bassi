@@ -1,21 +1,22 @@
-# Voz de Nala
+# Nala's voice
 
-`reference.wav` es el audio de referencia que Chatterbox usa para clonar la
-voz de Nala. No se incluye en el repo por defecto — si falta, Nala hace
-fallback automático a Windows SAPI (ver `NALA_TTS` en el README principal).
+`reference.wav` is the reference audio Chatterbox uses to clone Nala's
+voice. It's not included in the repo by default — if it's missing, Nala
+automatically falls back to Windows SAPI (see `NALA_TTS` in the main
+README).
 
-## Cómo grabar una referencia
+## Recording a reference
 
-- 10-20 segundos de una sola voz, sin música ni ruido de fondo.
-- Mono, 24 kHz o más.
-- Habla natural y continua (evita silencios largos o muletillas).
-- Guarda el archivo como `data/voices/nala/reference.wav`.
+- 10-20 seconds of a single voice, no music or background noise.
+- Mono, 24 kHz or higher.
+- Natural, continuous speech (avoid long silences or filler words).
+- Save the file as `data/voices/nala/reference.wav`.
 
-## Cómo usar otra referencia
+## Using a different reference
 
-Sin mover archivos, apunta `NALA_CHATTERBOX_REFERENCE` a la ruta que
-quieras:
+Without moving any files, point `NALA_CHATTERBOX_REFERENCE` at the path
+you want:
 
 ```powershell
-$env:NALA_CHATTERBOX_REFERENCE = "C:\ruta\a\otra_voz.wav"
+$env:NALA_CHATTERBOX_REFERENCE = "C:\path\to\other_voice.wav"
 ```
