@@ -27,9 +27,13 @@ fn rotates_phrases_for_the_same_state_across_a_turn() {
         .expect("first Thinking should narrate");
 
     // Something else happens in between, so the repeat-suppression rule
-    // doesn't swallow the second Thinking.
-    narrator.narrate(&Event::StateChanged {
-        state: TurnState::Executing,
+    // doesn't swallow the second Thinking. `Executing` itself doesn't
+    // narrate (see `narration.rs`), so a real intervening event is needed
+    // here — a tool starting is what actually separates two `Thinking`
+    // states in a real turn.
+    narrator.narrate(&Event::ToolStarted {
+        name: "click".to_string(),
+        arguments: "{}".to_string(),
     });
 
     let second = narrator
@@ -56,6 +60,24 @@ fn suppresses_the_same_state_repeated_back_to_back() {
     });
 
     assert_eq!(second, None);
+}
+
+#[test]
+fn does_not_narrate_generic_state_transitions() {
+    // Regression guard: `Executing` used to say generic filler ("Voy a
+    // hacerlo ahora") that immediately preceded `ToolStarted` saying
+    // something specific about the same action — pure noise. Only
+    // `Thinking` and `Verifying` have a real silent gap behind them.
+    let mut narrator = TemplateNarrator::new();
+
+    for state in [
+        TurnState::Receiving,
+        TurnState::Planning,
+        TurnState::Executing,
+        TurnState::Responding,
+    ] {
+        assert_eq!(narrator.narrate(&Event::StateChanged { state }), None);
+    }
 }
 
 #[test]

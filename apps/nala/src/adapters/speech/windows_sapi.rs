@@ -9,9 +9,22 @@ use crate::ports::speech::{Speech, SpeechError};
 /// PowerShell's `System.Speech` assembly rather than a native SAPI COM
 /// binding — no extra crate/build-script dependency, and PowerShell ships
 /// with every Windows install this targets.
+///
+/// Two details that aren't optional:
+/// - `[Console]::InputEncoding` must be set to UTF-8 *before* reading
+///   stdin. `[Console]::In.ReadToEnd()` otherwise reads using the
+///   console's legacy OEM codepage, which mangles any accented character
+///   (á, é, í, ó, ú, ñ) since text is written to the child's stdin as
+///   UTF-8 bytes.
+/// - If a Spanish voice is installed, it's selected explicitly. The
+///   default voice on an English Windows install mispronounces Spanish
+///   even once the characters themselves are correct.
 const SCRIPT: &str = "Add-Type -AssemblyName System.Speech; \
+      [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
       $t = [Console]::In.ReadToEnd(); \
       $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+      $voice = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq 'es' } | Select-Object -First 1; \
+      if ($voice) { $s.SelectVoice($voice.VoiceInfo.Name) }; \
       $s.Speak($t)";
 
 pub struct WindowsSapiSpeech;
