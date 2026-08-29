@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use nala::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
 use nala::ports::tool::ToolDefinition;
@@ -426,7 +425,7 @@ impl Llm for RepeatsSameCallTwiceThenAnswersLlm {
 pub struct PlansThenExecutesLlm {
     calls: u32,
     pub plan: String,
-    pub messages_on_execute_call: Rc<RefCell<Option<Vec<Message>>>>,
+    pub messages_on_execute_call: Arc<Mutex<Option<Vec<Message>>>>,
 }
 
 impl PlansThenExecutesLlm {
@@ -434,7 +433,7 @@ impl PlansThenExecutesLlm {
         Self {
             calls: 0,
             plan: plan.to_string(),
-            messages_on_execute_call: Rc::new(RefCell::new(None)),
+            messages_on_execute_call: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -451,7 +450,7 @@ impl Llm for PlansThenExecutesLlm {
         match calls {
             0 => Ok(LlmResponse::text(self.plan.clone())),
             1 => {
-                *self.messages_on_execute_call.borrow_mut() = Some(messages.to_vec());
+                *self.messages_on_execute_call.lock().unwrap() = Some(messages.to_vec());
                 Ok(LlmResponse::tool_call(ToolCall {
                     name: "execute_command".to_string(),
                     arguments: r#"{"command":"start spotify"}"#.to_string(),
@@ -589,6 +588,37 @@ impl Llm for FailsPlanningThenExecutesLlm {
                 arguments: r#"{"command":"start spotify"}"#.to_string(),
             })),
             _ => Ok(LlmResponse::text("done".to_string())),
+        }
+    }
+}
+
+/// Answers the planning call immediately (so a turn reaches the main loop),
+/// then blocks forever on the first call that has tools available — it
+/// never returns. Used to prove that cancelling mid-call abandons the wait
+/// instead of blocking until the (never-arriving) result, the exact bug
+/// this fake exists to catch: cancellation must interrupt an in-flight LLM
+/// call, not just the gaps between calls.
+#[derive(Default)]
+pub struct HangsOnRealCallLlm;
+
+impl HangsOnRealCallLlm {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Llm for HangsOnRealCallLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     }
 }

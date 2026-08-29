@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 // `SystemClock` is an adapter, but it wraps nothing but `std::time` and
 // `std::thread::sleep` — no I/O, no state, no dependency on this process's
 // wiring — so `Assistant::new` can default to it directly instead of
@@ -66,7 +68,11 @@ The `type` tool types into whatever currently has keyboard focus — it does not
 Respond with ONLY the plan as plain numbered text. Do not call any tool yet — this message has no tools available on purpose, so calling one is impossible; just describe the steps.";
 
 pub struct Assistant<L, D, E> {
-    pub(crate) llm: L,
+    // `Arc<Mutex<...>>` rather than a bare `L`: a call to the LLM runs on a
+    // background thread (see `agent_loop::call_llm`) so the main thread can
+    // abandon waiting on it as soon as cancellation is requested, instead
+    // of being stuck until the in-flight HTTP request itself returns.
+    pub(crate) llm: Arc<Mutex<L>>,
     pub(crate) dispatcher: D,
     pub(crate) registry: ToolRegistry,
     pub(crate) transcript: Transcript,
@@ -100,14 +106,14 @@ where
 
 impl<L, D, E> Assistant<L, D, E>
 where
-    L: Llm,
+    L: Llm + Send + 'static,
     D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
     E: EventSink,
 {
     pub fn new(llm: L, dispatcher: D, registry: ToolRegistry, events: E) -> Self {
         Self {
-            llm,
+            llm: Arc::new(Mutex::new(llm)),
             dispatcher,
             registry,
             events,

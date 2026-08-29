@@ -24,8 +24,8 @@ use crate::{
         AnswersEmptyTwiceThenTextLlm, CallsScreenshotThenAnswersLlm,
         ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm, FailingLlm,
         FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm, FailsWithInvalidResponseLlm,
-        FakeLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm,
-        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        FakeLlm, HangsOnRealCallLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
+        RepeatsSameToolCallLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
@@ -43,7 +43,7 @@ fn assistant_with<L>(
     computer: FakeComputer,
 ) -> Assistant<L, ToolDispatcher<FakeComputer>, ConsoleEventSink>
 where
-    L: nala::ports::llm::Llm,
+    L: nala::ports::llm::Llm + Send + 'static,
 {
     let tool = ExecuteCommandTool::new(computer);
 
@@ -303,7 +303,7 @@ fn generates_a_plan_before_executing_and_keeps_it_in_context() {
 
     assert_eq!(result.unwrap(), "done");
 
-    let captured = messages_on_execute_call.borrow();
+    let captured = messages_on_execute_call.lock().unwrap();
     let captured = captured
         .as_ref()
         .expect("the execute-step call should have happened");
@@ -502,6 +502,37 @@ fn does_not_retry_a_non_retryable_llm_failure() {
         sleeps.borrow().len(),
         0,
         "an invalid-response failure should not be retried"
+    );
+}
+
+#[test]
+fn cancelling_mid_call_abandons_a_hanging_llm_call_instead_of_waiting_for_it() {
+    // Regression test: cancellation used to only be checked between LLM
+    // calls, so Ctrl+C during a single (slow) call had no effect until that
+    // call itself returned — which, against a real local model, can take
+    // well over a minute. HangsOnRealCallLlm never returns from its "real"
+    // call, so this only passes if `process` gives up on it directly.
+    let cancel = FakeCancelSignal::new();
+    let cancel_clone = cancel.clone();
+
+    let mut assistant = assistant_with(HangsOnRealCallLlm::new(), FakeComputer::new())
+        .with_cancel_signal(Box::new(cancel_clone));
+
+    // Cancels shortly after the turn starts, from a separate thread, since
+    // `process` below blocks the test thread until it returns.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        cancel.cancel();
+    });
+
+    let start = std::time::Instant::now();
+    let result = assistant.process("do something that never comes back");
+    let elapsed = start.elapsed();
+
+    assert!(matches!(result, Err(AssistantError::Cancelled)));
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "expected process() to abandon the hanging call promptly, took {elapsed:?}"
     );
 }
 

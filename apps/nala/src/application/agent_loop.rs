@@ -1,4 +1,7 @@
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::application::assistant::{Assistant, PLANNING_INSTRUCTIONS};
 use crate::application::assistant::{
@@ -16,6 +19,11 @@ use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 /// bounds how long the loop waits on a model that's stuck saying nothing.
 const MAX_EMPTY_RESPONSES: usize = 3;
 
+/// How often `call_llm` checks for cancellation while waiting on the
+/// background LLM call. Short enough that Ctrl+C feels immediate, long
+/// enough not to spin the CPU polling a channel.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// A retryable `LlmError` is worth trying again (network hiccup, non-2xx
 /// status, ...); an `InvalidResponse` means the server answered but the
 /// body didn't parse — retrying the identical request won't change that,
@@ -24,9 +32,17 @@ fn is_retryable(error: &LlmError) -> bool {
     matches!(error, LlmError::RequestFailed(_))
 }
 
+/// The result of a `call_llm` call: either the LLM call finished (with a
+/// success or failure), or cancellation was requested before it did and the
+/// caller gave up waiting on it.
+enum LlmCallOutcome {
+    Completed(Result<LlmResponse, LlmError>),
+    Cancelled,
+}
+
 impl<L, D, E> Assistant<L, D, E>
 where
-    L: Llm,
+    L: Llm + Send + 'static,
     D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
     E: EventSink,
@@ -42,13 +58,12 @@ where
         let mut messages = self.build_prompt_messages()?;
         // Cloned rather than borrowed from `self.registry`, so `tools` doesn't
         // keep an immutable borrow of `self` alive across the `&mut self`
-        // calls below (`build_plan`, `self.llm.generate`, ...).
+        // calls below (`build_plan`, `self.generate`, ...).
         let tool_definitions: Vec<ToolDefinition> =
             self.registry.definitions().into_iter().cloned().collect();
-        let tools: Vec<&ToolDefinition> = tool_definitions.iter().collect();
 
         self.set_state(TurnState::Planning);
-        if let Some(plan) = self.build_plan(&messages, &tools) {
+        if let Some(plan) = self.build_plan(&messages, &tool_definitions) {
             self.events.emit(Event::PlanCreated { plan: plan.clone() });
             messages.push(assistant_text_message(format!("Plan:\n{plan}")));
         }
@@ -175,7 +190,8 @@ where
     /// Calls the LLM, retrying a retryable failure with exponential backoff
     /// up to `limits.max_llm_retries` times before giving up. A fatal
     /// failure (e.g. a response that doesn't parse) or a cancellation
-    /// requested mid-backoff returns immediately instead of retrying.
+    /// requested mid-call or mid-backoff returns immediately instead of
+    /// retrying.
     fn generate_with_retry(
         &mut self,
         messages: &[Message],
@@ -185,15 +201,13 @@ where
 
         loop {
             match self.generate(messages) {
-                Ok(response) => return Ok(response),
-                Err(error) => {
-                    let retryable = match &error {
-                        AssistantError::Llm(llm_error) => is_retryable(llm_error),
-                        _ => false,
-                    };
+                LlmCallOutcome::Cancelled => return Err(self.cancelled(request_start)),
+                LlmCallOutcome::Completed(Ok(response)) => return Ok(response),
+                LlmCallOutcome::Completed(Err(llm_error)) => {
+                    let retryable = is_retryable(&llm_error);
 
                     if !retryable || attempt >= self.limits.max_llm_retries {
-                        return Err(error);
+                        return Err(AssistantError::Llm(llm_error));
                     }
 
                     if self.cancel.is_cancelled() {
@@ -202,7 +216,7 @@ where
 
                     self.events.emit(Event::Retrying {
                         attempt: attempt + 1,
-                        error: error.to_string(),
+                        error: llm_error.to_string(),
                     });
 
                     let delay = self.limits.retry_base_delay * 2u32.pow(attempt);
@@ -213,13 +227,8 @@ where
         }
     }
 
-    fn generate(
-        &mut self,
-        messages: &[Message],
-    ) -> Result<LlmResponse, AssistantError<LlmError, D::Error>> {
-        let tool_definitions: Vec<ToolDefinition> =
-            self.registry.definitions().into_iter().cloned().collect();
-        let tools: Vec<&ToolDefinition> = tool_definitions.iter().collect();
+    fn generate(&mut self, messages: &[Message]) -> LlmCallOutcome {
+        let tools: Vec<ToolDefinition> = self.registry.definitions().into_iter().cloned().collect();
 
         let outgoing_images: usize = messages.iter().map(|message| message.images.len()).sum();
         self.events.emit(Event::LlmStarted {
@@ -227,20 +236,64 @@ where
         });
 
         let start = Instant::now();
-        let response = self.llm.generate(messages, &tools);
+        let outcome = self.call_llm(messages.to_vec(), tools);
         let duration = start.elapsed();
 
-        match response {
-            Ok(response) => {
+        match &outcome {
+            LlmCallOutcome::Completed(Ok(_)) => {
                 self.events.emit(Event::LlmCompleted { duration });
-                Ok(response)
             }
-            Err(error) => {
+            LlmCallOutcome::Completed(Err(error)) => {
                 self.events.emit(Event::RequestFailed {
                     duration,
                     error: error.to_string(),
                 });
-                Err(AssistantError::Llm(error))
+            }
+            // No event here: cancellation is reported once, by whichever
+            // caller turns it into `AssistantError::Cancelled` (see
+            // `cancelled`), not per LLM call.
+            LlmCallOutcome::Cancelled => {}
+        }
+
+        outcome
+    }
+
+    /// Runs the actual LLM call on a background thread and waits for it
+    /// with short polls instead of one blocking call, so cancellation
+    /// requested while a call is in flight (a single call can take well
+    /// over a minute against a local model) takes effect immediately
+    /// instead of only between calls. The background thread is not
+    /// interrupted on cancellation — there's no way to abort an in-flight
+    /// HTTP request from the outside — it's simply abandoned: it keeps
+    /// running until the real request completes or fails, and its result is
+    /// dropped since nothing is left waiting on the channel.
+    fn call_llm(&mut self, messages: Vec<Message>, tools: Vec<ToolDefinition>) -> LlmCallOutcome {
+        let llm = Arc::clone(&self.llm);
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let tool_refs: Vec<&ToolDefinition> = tools.iter().collect();
+            let mut llm = match llm.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let result = llm.generate(&messages, &tool_refs);
+            let _ = sender.send(result);
+        });
+
+        loop {
+            match receiver.recv_timeout(CANCEL_POLL_INTERVAL) {
+                Ok(result) => return LlmCallOutcome::Completed(result),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if self.cancel.is_cancelled() {
+                        return LlmCallOutcome::Cancelled;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return LlmCallOutcome::Completed(Err(LlmError::RequestFailed(
+                        "LLM worker thread stopped without a result".to_string(),
+                    )));
+                }
             }
         }
     }
@@ -281,15 +334,17 @@ where
     /// has an explicit target to follow instead of being decided one tool
     /// call at a time with no larger goal in view.
     ///
-    /// Tools are deliberately withheld from this call (an empty slice, not
+    /// Tools are deliberately withheld from this call (an empty list, not
     /// `tools`) — a text-summarized list is included in the prompt instead
     /// — so a tool-eager model can't skip straight to acting instead of
-    /// planning. A failure here (network error, etc.) isn't fatal to the
-    /// request: it just means proceeding without a plan.
+    /// planning. A failure here (network error, cancellation, etc.) isn't
+    /// fatal to the request: it just means proceeding without a plan — a
+    /// cancellation requested during planning is still caught a moment
+    /// later, at the top of the main loop below.
     pub(crate) fn build_plan(
         &mut self,
         messages: &[Message],
-        tools: &[&ToolDefinition],
+        tools: &[ToolDefinition],
     ) -> Option<String> {
         let tool_summary: String = tools
             .iter()
@@ -304,10 +359,13 @@ where
 
         self.events.emit(Event::LlmStarted { images: 0 });
         let start = Instant::now();
-        let response = self.llm.generate(&planning_messages, &[]);
+        let outcome = self.call_llm(planning_messages, Vec::new());
         let duration = start.elapsed();
 
-        let response = response.ok()?;
+        let response = match outcome {
+            LlmCallOutcome::Completed(Ok(response)) => response,
+            LlmCallOutcome::Completed(Err(_)) | LlmCallOutcome::Cancelled => return None,
+        };
         self.events.emit(Event::LlmCompleted { duration });
 
         match response.text {
