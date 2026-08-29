@@ -3,19 +3,34 @@ use std::collections::HashMap;
 use crate::ports::events::{Event, TurnState};
 use crate::ports::narrator::Narrator;
 
-const RECEIVING: &[&str] = &["Recibí tu mensaje."];
-const PLANNING: &[&str] = &["Voy a armar un plan antes de empezar."];
+// `Receiving`, `Planning`, `Executing`, and `Responding` deliberately don't
+// narrate anything: `Executing` in particular used to say generic filler
+// ("Voy a hacerlo ahora") right before `ToolStarted` says something specific
+// about the same action — pure noise on top of signal. `Thinking` and
+// `Verifying` are kept because they're the only states with real silent gaps
+// behind them (an LLM call, a verification check).
 const THINKING: &[&str] = &[
     "Déjame pensar un momento.",
     "Estoy revisando la mejor forma de hacerlo.",
     "Un segundo, estoy evaluando los pasos.",
+    "Dame un momento para decidir el siguiente paso.",
 ];
-const EXECUTING: &[&str] = &["Voy a hacerlo ahora.", "Manos a la obra."];
-const VERIFYING: &[&str] = &["Déjame confirmar que salió bien."];
-const RESPONDING: &[&str] = &["Ya casi tengo la respuesta."];
-const RETRYING: &[&str] = &["Eso no funcionó, déjame intentar de otra forma."];
-const TOOL_ERROR: &[&str] = &["Eso falló, voy a intentar otra cosa."];
-const TOOL_GENERIC: &[&str] = &["Voy a usar una herramienta."];
+const VERIFYING: &[&str] = &[
+    "Déjame confirmar que salió bien.",
+    "Voy a revisar que el resultado sea el esperado.",
+];
+const RETRYING: &[&str] = &[
+    "Eso no funcionó, déjame intentar de otra forma.",
+    "No salió como esperaba, voy a probar otra cosa.",
+];
+const TOOL_ERROR: &[&str] = &[
+    "Eso falló, voy a intentar otra cosa.",
+    "Algo salió mal ahí, dejame ajustar el enfoque.",
+];
+const TOOL_GENERIC: &[&str] = &[
+    "Voy a usar una herramienta.",
+    "Voy a hacer algo en la pantalla.",
+];
 
 /// Translates a tool call's name into a natural-language phrase. The
 /// computer-use toolset is discovered dynamically at connect time (see
@@ -23,12 +38,15 @@ const TOOL_GENERIC: &[&str] = &["Voy a usar una herramienta."];
 /// a generic phrase instead of narrating nothing.
 fn tool_phrase_bank(name: &str) -> &'static [&'static str] {
     match name {
-        "screenshot" => &["Déjame ver la pantalla."],
-        "execute_command" => &["Voy a ejecutar un comando."],
-        "type" => &["Voy a escribir eso."],
-        "key" => &["Voy a presionar una tecla."],
-        "click" => &["Voy a hacer clic ahí."],
-        "scroll" => &["Voy a desplazar la pantalla."],
+        "screenshot" => &["Déjame ver la pantalla.", "Voy a mirar cómo va todo."],
+        "execute_command" => &[
+            "Voy a ejecutar un comando.",
+            "Voy a correr algo en la terminal.",
+        ],
+        "type" => &["Voy a escribir eso.", "Ahora escribo el texto."],
+        "key" => &["Presiono una tecla.", "Ahora una tecla."],
+        "click" => &["Voy a hacer clic ahí.", "Hago clic en ese punto."],
+        "scroll" => &["Voy a desplazar la pantalla.", "Bajo un poco la pantalla."],
         _ => TOOL_GENERIC,
     }
 }
@@ -70,17 +88,13 @@ impl TemplateNarrator {
 impl Narrator for TemplateNarrator {
     fn narrate(&mut self, event: &Event) -> Option<String> {
         match event {
-            Event::StateChanged { state } => {
-                let (key, bank): (&str, &[&str]) = match state {
-                    TurnState::Receiving => ("state:receiving", RECEIVING),
-                    TurnState::Planning => ("state:planning", PLANNING),
-                    TurnState::Thinking => ("state:thinking", THINKING),
-                    TurnState::Executing => ("state:executing", EXECUTING),
-                    TurnState::Verifying => ("state:verifying", VERIFYING),
-                    TurnState::Responding => ("state:responding", RESPONDING),
-                };
-                self.pick(key, bank)
-            }
+            Event::StateChanged {
+                state: TurnState::Thinking,
+            } => self.pick("state:thinking", THINKING),
+            Event::StateChanged {
+                state: TurnState::Verifying,
+            } => self.pick("state:verifying", VERIFYING),
+            Event::StateChanged { .. } => None,
             Event::ToolStarted { name, .. } => {
                 let key = format!("tool:{name}");
                 let bank = tool_phrase_bank(name);
