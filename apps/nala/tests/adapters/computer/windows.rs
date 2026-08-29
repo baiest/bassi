@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use nala::adapters::computer::windows::Windows;
 use nala::ports::computer::Computer;
 
@@ -10,7 +12,7 @@ fn opens_application() {
     let environment = FakeEnvironment::new();
     let mut computer = Windows::new(process, environment);
 
-    let result = computer.execute_command("Chrome");
+    let result = computer.execute_command("Chrome", Duration::from_secs(30));
 
     assert!(result.is_ok())
 }

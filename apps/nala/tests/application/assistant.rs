@@ -2,6 +2,7 @@ use nala::{
     adapters::events::console::ConsoleEventSink,
     application::{
         assistant::{Assistant, AssistantError, MAX_HISTORY_MESSAGES},
+        loop_limits::LoopLimits,
         tools::{
             Tool,
             computer_use::ComputerUseToolset,
@@ -14,15 +15,17 @@ use nala::{
 };
 
 use crate::{
+    fake_cancel::FakeCancelSignal,
+    fake_clock::FakeClock,
     fake_computer::FakeComputer,
     fake_events::RecordingEventSink,
     fake_llm::{
-        AlwaysAnswersEmptyLlm, AlwaysCallsToolLlm, AlwaysRepliesTextLlm,
+        AlwaysAnswersEmptyLlm, AlwaysCallsToolLlm, AlwaysFailsRetryableLlm, AlwaysRepliesTextLlm,
         AnswersEmptyTwiceThenTextLlm, CallsScreenshotThenAnswersLlm,
         ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm, FailingLlm,
-        FailsPlanningThenExecutesLlm, FakeLlm, PlansThenExecutesLlm,
-        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm,
-        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm, FailsWithInvalidResponseLlm,
+        FakeLlm, HangsOnRealCallLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
+        RepeatsSameToolCallLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
@@ -40,7 +43,7 @@ fn assistant_with<L>(
     computer: FakeComputer,
 ) -> Assistant<L, ToolDispatcher<FakeComputer>, ConsoleEventSink>
 where
-    L: nala::ports::llm::Llm,
+    L: nala::ports::llm::Llm + Send + 'static,
 {
     let tool = ExecuteCommandTool::new(computer);
 
@@ -63,7 +66,15 @@ fn executes_tool_requested_by_llm() {
 
 #[test]
 fn stops_after_reaching_max_tool_calls() {
-    let mut assistant = assistant_with(AlwaysCallsToolLlm::new(), FakeComputer::new());
+    // AlwaysCallsToolLlm targets an unregistered tool, so every call also
+    // fails; disable the consecutive-failure limit so this test isolates
+    // MAX_TOOL_CALLS instead of tripping TooManyConsecutiveToolFailures
+    // first (that limit gets its own test below).
+    let mut assistant =
+        assistant_with(AlwaysCallsToolLlm::new(), FakeComputer::new()).with_limits(LoopLimits {
+            max_consecutive_tool_failures: usize::MAX,
+            ..LoopLimits::default()
+        });
 
     let result = assistant.process("do something repeatedly");
 
@@ -72,7 +83,14 @@ fn stops_after_reaching_max_tool_calls() {
 
 #[test]
 fn returns_llm_error_when_generation_fails() {
-    let mut assistant = assistant_with(FailingLlm::new(), FakeComputer::new());
+    // FailingLlm's error is retryable; disabling retries here keeps this
+    // test about "an LLM error surfaces as AssistantError::Llm", not about
+    // retry behavior (which has its own tests below).
+    let mut assistant =
+        assistant_with(FailingLlm::new(), FakeComputer::new()).with_limits(LoopLimits {
+            max_llm_retries: 0,
+            ..LoopLimits::default()
+        });
 
     let result = assistant.process("open chrome");
 
@@ -186,7 +204,7 @@ fn returns_loop_detected_on_repeated_failing_tool_call() {
 
     let result = assistant.process("open chrome");
 
-    assert!(matches!(result, Err(AssistantError::LoopDetected)));
+    assert!(matches!(result, Err(AssistantError::LoopDetected(_))));
 }
 
 #[test]
@@ -285,7 +303,7 @@ fn generates_a_plan_before_executing_and_keeps_it_in_context() {
 
     assert_eq!(result.unwrap(), "done");
 
-    let captured = messages_on_execute_call.borrow();
+    let captured = messages_on_execute_call.lock().unwrap();
     let captured = captured
         .as_ref()
         .expect("the execute-step call should have happened");
@@ -410,6 +428,147 @@ fn emits_turn_states_in_order() {
             TurnState::Thinking,
             TurnState::Responding,
         ]
+    );
+}
+
+#[test]
+fn stops_after_too_many_consecutive_tool_failures() {
+    // AlwaysCallsToolLlm targets an unregistered tool, so every call fails
+    // with a distinct-arguments dispatcher error (never identical, so this
+    // doesn't trip loop detection) — well under MAX_TOOL_CALLS too, so this
+    // isolates the consecutive-failure limit.
+    let mut assistant = assistant_with(AlwaysCallsToolLlm::new(), FakeComputer::new());
+
+    let result = assistant.process("do something that keeps failing");
+
+    assert!(matches!(
+        result,
+        Err(AssistantError::TooManyConsecutiveToolFailures(5))
+    ));
+}
+
+#[test]
+fn retries_a_retryable_llm_failure_and_recovers() {
+    let clock = FakeClock::new();
+    let sleeps = clock.sleeps();
+
+    let mut assistant = assistant_with(FailsTwiceThenSucceedsLlm::new(), FakeComputer::new())
+        .with_clock(Box::new(clock));
+
+    let result = assistant.process("open chrome");
+
+    assert_eq!(result.unwrap(), "recovered");
+    assert_eq!(
+        sleeps.borrow().len(),
+        2,
+        "expected one backoff sleep per retried failure"
+    );
+}
+
+#[test]
+fn gives_up_after_max_llm_retries_on_a_retryable_failure() {
+    let clock = FakeClock::new();
+    let sleeps = clock.sleeps();
+
+    let mut assistant = assistant_with(AlwaysFailsRetryableLlm::new(), FakeComputer::new())
+        .with_clock(Box::new(clock))
+        .with_limits(LoopLimits {
+            max_llm_retries: 2,
+            ..LoopLimits::default()
+        });
+
+    let result = assistant.process("open chrome");
+
+    assert!(matches!(result, Err(AssistantError::Llm(_))));
+    assert_eq!(
+        sleeps.borrow().len(),
+        2,
+        "expected exactly max_llm_retries sleeps"
+    );
+}
+
+#[test]
+fn does_not_retry_a_non_retryable_llm_failure() {
+    let clock = FakeClock::new();
+    let sleeps = clock.sleeps();
+
+    let mut assistant = assistant_with(FailsWithInvalidResponseLlm::new(), FakeComputer::new())
+        .with_clock(Box::new(clock));
+
+    let result = assistant.process("open chrome");
+
+    assert!(matches!(result, Err(AssistantError::Llm(_))));
+    assert_eq!(
+        sleeps.borrow().len(),
+        0,
+        "an invalid-response failure should not be retried"
+    );
+}
+
+#[test]
+fn cancelling_mid_call_abandons_a_hanging_llm_call_instead_of_waiting_for_it() {
+    // Regression test: cancellation used to only be checked between LLM
+    // calls, so Ctrl+C during a single (slow) call had no effect until that
+    // call itself returned — which, against a real local model, can take
+    // well over a minute. HangsOnRealCallLlm never returns from its "real"
+    // call, so this only passes if `process` gives up on it directly.
+    let cancel = FakeCancelSignal::new();
+    let cancel_clone = cancel.clone();
+
+    let mut assistant = assistant_with(HangsOnRealCallLlm::new(), FakeComputer::new())
+        .with_cancel_signal(Box::new(cancel_clone));
+
+    // Cancels shortly after the turn starts, from a separate thread, since
+    // `process` below blocks the test thread until it returns.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        cancel.cancel();
+    });
+
+    let start = std::time::Instant::now();
+    let result = assistant.process("do something that never comes back");
+    let elapsed = start.elapsed();
+
+    assert!(matches!(result, Err(AssistantError::Cancelled)));
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "expected process() to abandon the hanging call promptly, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn stops_when_cancelled_before_a_tool_call_runs() {
+    let cancel = FakeCancelSignal::new();
+    let cancel_clone = cancel.clone();
+
+    // Cancels as soon as the first tool call would run; the fake LLM would
+    // otherwise keep calling tools forever.
+    let tool = ExecuteCommandTool::new(FakeComputer::new());
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let mut assistant = Assistant::new(
+        RepeatsSameToolCallLlm::new(),
+        dispatcher,
+        registry(),
+        RecordingEventSink::new(),
+    )
+    .with_cancel_signal(Box::new(cancel_clone));
+
+    cancel.cancel();
+
+    let result = assistant.process("open chrome");
+
+    assert!(matches!(result, Err(AssistantError::Cancelled)));
+    let tool_starts = assistant
+        .events()
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::ToolStarted { .. }))
+        .count();
+    assert_eq!(
+        tool_starts, 0,
+        "no tool should run once cancellation was already requested"
     );
 }
 
