@@ -1,8 +1,31 @@
 use std::time::Duration;
 
+/// The phase the agent loop is currently in, for surfacing progress to the
+/// UI (e.g. "Nala is thinking..." vs "Nala is executing..."). Transitions
+/// are emitted as `Event::StateChanged`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnState {
+    /// The user's input has been received and the turn is starting.
+    Receiving,
+    /// Generating the up-front step-by-step plan.
+    Planning,
+    /// Waiting on the LLM to decide the next action.
+    Thinking,
+    /// Running one or more tool calls the LLM requested.
+    Executing,
+    /// Mutating tool calls happened this turn and their effect hasn't been
+    /// independently confirmed yet.
+    Verifying,
+    /// Producing the final natural-language answer.
+    Responding,
+}
+
 #[derive(Debug)]
 pub enum Event {
     RequestStarted,
+    StateChanged {
+        state: TurnState,
+    },
     RequestCompleted {
         duration: Duration,
     },

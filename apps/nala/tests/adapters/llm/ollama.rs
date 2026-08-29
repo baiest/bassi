@@ -1,5 +1,5 @@
 use nala::adapters::llm::ollama::OllamaLlm;
-use nala::ports::llm::{Llm, LlmError, LlmResponse, Message};
+use nala::ports::llm::{Llm, LlmError, Message};
 
 use crate::http_stub::HttpStub;
 
@@ -37,9 +37,10 @@ fn returns_text_response() {
     );
     let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
 
-    let result = llm.generate(&[user_message("hello")], &[]);
+    let result = llm.generate(&[user_message("hello")], &[]).unwrap();
 
-    assert!(matches!(result, Ok(LlmResponse::Text(text)) if text == "chrome opened"));
+    assert_eq!(result.text.as_deref(), Some("chrome opened"));
+    assert!(result.tool_calls.is_empty());
 }
 
 #[test]
@@ -52,19 +53,15 @@ fn returns_tool_call_from_response() {
     );
     let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
 
-    let result = llm.generate(&[user_message("open chrome")], &[]);
+    let result = llm.generate(&[user_message("open chrome")], &[]).unwrap();
 
-    match result {
-        Ok(LlmResponse::ToolCall(tool_call)) => {
-            assert_eq!(tool_call.name, "execute_command");
-            assert!(tool_call.arguments.contains("start chrome"));
-        }
-        other => panic!("expected a tool call, got {other:?}"),
-    }
+    assert_eq!(result.tool_calls.len(), 1);
+    assert_eq!(result.tool_calls[0].name, "execute_command");
+    assert!(result.tool_calls[0].arguments.contains("start chrome"));
 }
 
 #[test]
-fn returns_first_tool_call_when_many() {
+fn returns_every_tool_call_when_many() {
     let stub = HttpStub::start(
         200,
         r#"{"message":{"content":"","tool_calls":[
@@ -74,9 +71,14 @@ fn returns_first_tool_call_when_many() {
     );
     let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();
 
-    let result = llm.generate(&[], &[]);
+    let result = llm.generate(&[], &[]).unwrap();
 
-    assert!(matches!(result, Ok(LlmResponse::ToolCall(tool_call)) if tool_call.name == "first"));
+    let names: Vec<&str> = result
+        .tool_calls
+        .iter()
+        .map(|tool_call| tool_call.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["first", "second"]);
 }
 
 #[test]

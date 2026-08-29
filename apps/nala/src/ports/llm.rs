@@ -16,10 +16,49 @@ pub enum LlmError {
     InvalidResponse(String),
 }
 
-#[derive(Debug)]
-pub enum LlmResponse {
-    Text(String),
-    ToolCall(ToolCall),
+/// A single LLM turn. `tool_calls` may hold more than one entry — a model
+/// can request several actions in one response (e.g. "screenshot" won't do
+/// that, but many models batch independent calls) — and the loop executes
+/// all of them before calling the model again. `text` and `tool_calls` are
+/// not mutually exclusive: a model may emit both a short remark and one or
+/// more tool calls in the same turn.
+#[derive(Debug, Clone, Default)]
+pub struct LlmResponse {
+    pub text: Option<String>,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+impl LlmResponse {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: Some(text.into()),
+            tool_calls: Vec::new(),
+        }
+    }
+
+    pub fn tool_call(tool_call: ToolCall) -> Self {
+        Self {
+            text: None,
+            tool_calls: vec![tool_call],
+        }
+    }
+
+    pub fn tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+        Self {
+            text: None,
+            tool_calls,
+        }
+    }
+
+    /// A response is answerable (can end the turn) only if it carries no
+    /// pending tool calls and non-empty text.
+    pub fn is_final_answer(&self) -> bool {
+        self.tool_calls.is_empty()
+            && self
+                .text
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

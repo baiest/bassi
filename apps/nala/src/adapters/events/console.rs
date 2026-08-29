@@ -1,4 +1,4 @@
-use crate::ports::events::{Event, EventSink};
+use crate::ports::events::{Event, EventSink, TurnState};
 
 pub struct ConsoleEventSink;
 
@@ -7,6 +7,17 @@ impl EventSink for ConsoleEventSink {
         match event {
             Event::RequestStarted => {
                 println!("[REQUEST] started");
+            }
+            Event::StateChanged { state } => {
+                let label = match state {
+                    TurnState::Receiving => "receiving",
+                    TurnState::Planning => "planning",
+                    TurnState::Thinking => "thinking",
+                    TurnState::Executing => "executing",
+                    TurnState::Verifying => "verifying",
+                    TurnState::Responding => "responding",
+                };
+                println!("[STATE] {label}");
             }
             Event::RequestCompleted { duration } => {
                 println!("[REQUEST] completed in {:?}\n", duration);
