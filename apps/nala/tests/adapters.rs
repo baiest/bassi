@@ -43,8 +43,8 @@ mod async_speech;
 #[path = "adapters/speech/chatterbox_config.rs"]
 mod chatterbox_config;
 
-#[path = "adapters/speech/chatterbox.rs"]
-mod chatterbox;
+#[path = "adapters/speech/streaming_speech.rs"]
+mod streaming_speech;
 
 #[path = "adapters/speech/chatterbox_http.rs"]
 mod chatterbox_http;

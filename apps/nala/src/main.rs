@@ -12,8 +12,8 @@ use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::adapters::speech::async_speech::AsyncSpeech;
 use nala::adapters::speech::chatterbox::HttpChatterbox;
 use nala::adapters::speech::chatterbox::config::ChatterboxConfig;
-use nala::adapters::speech::chatterbox::speech::ChatterboxSpeech;
 use nala::adapters::speech::chatterbox::supervisor::ChatterboxSupervisor;
+use nala::adapters::speech::streaming_speech::StreamingSpeech;
 use nala::adapters::speech::windows_sapi::WindowsSapiSpeech;
 use nala::application::assistant::Assistant;
 use nala::application::narration::TemplateNarrator;
@@ -84,7 +84,7 @@ fn build_chatterbox() -> Result<(Box<dyn Speech + Send>, ChatterboxSupervisor), 
     let player = RodioPlayer::new()?;
 
     Ok((
-        Box::new(ChatterboxSpeech::new(Box::new(synth), Box::new(player))),
+        Box::new(StreamingSpeech::new(Box::new(synth), Box::new(player))),
         supervisor,
     ))
 }
