@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use nala::adapters::computer::windows::Windows;
 use nala::adapters::environment::system::SystemEnvironment;
 use nala::adapters::events::console::ConsoleEventSink;
@@ -14,6 +12,7 @@ use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
 use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::ping::PingTool;
 use nala::application::tools::registry::ToolRegistry;
+use nala::cli::prompt::MultilineReader;
 
 type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
 type McpClientType = StdioMcpClient<ChildTransport>;
@@ -63,23 +62,23 @@ fn main() {
 
     let mut assistant = Assistant::new(llm, dispatcher, registry, events);
 
-    let mut input = String::new();
+    let mut reader = MultilineReader::new();
+
     loop {
         println!("Hola, en que te puedo ayudar?");
-        print!("> ");
+        println!(
+            "(puedes escribir/pegar varias lineas y usar flechas/backspace entre ellas; Ctrl+Enter envia)"
+        );
 
-        io::stdout().flush().expect("Error cleaning buffer");
-
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed reading line");
+        let input = match reader.read().expect("Failed reading input") {
+            Some(input) => input,
+            None => break,
+        };
 
         match assistant.process(input.trim()) {
             Ok(response) => println!("{response}"),
             Err(e) => eprintln!("Error: {e}"),
         }
-
-        input.clear();
     }
 }
 
