@@ -95,6 +95,13 @@ pub enum Event {
     TranscriptCompacted {
         turns_compacted: usize,
     },
+
+    /// The model tried to end the turn with a mutating tool call still
+    /// unverified. The loop nudges it to check first (see
+    /// `agent_loop.rs`'s verification gate) — this event marks the one
+    /// case where that nudge is skipped and the answer is let through
+    /// anyway, so the turn can't get stuck nagging forever.
+    AnsweredUnverified,
 }
 
 /// Which eviction step fired in a `BudgetPressure` event, in the order the

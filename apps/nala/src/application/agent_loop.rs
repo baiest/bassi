@@ -84,6 +84,11 @@ where
         let mut tool_call_count: usize = 0;
         let mut empty_responses: usize = 0;
         let mut consecutive_tool_failures: usize = 0;
+        // Set by a mutating tool result, cleared by any subsequent tool
+        // call (the model checking its own work) or by the verification
+        // gate below letting one unverified answer through.
+        let mut unverified_mutation = false;
+        let mut verification_gate_used = false;
 
         loop {
             if self.cancel.is_cancelled() {
@@ -151,6 +156,12 @@ where
                         images: outcome.images.len(),
                     });
 
+                    // A mutating call leaves the turn unverified; any call
+                    // after it — mutating or not — counts as the model
+                    // checking its own work, so it clears the flag rather
+                    // than only a read-only one being able to.
+                    unverified_mutation = outcome.mutated;
+
                     messages.push(tool_result_message(tool_name, outcome));
 
                     if consecutive_tool_failures >= self.limits.max_consecutive_tool_failures {
@@ -174,6 +185,30 @@ where
 
             match response.text {
                 Some(text) if !text.trim().is_empty() => {
+                    if unverified_mutation && !verification_gate_used {
+                        // Give the model exactly one chance to check its
+                        // own work instead of ending the turn on an
+                        // unconfirmed mutation. Only one: a model that
+                        // genuinely has nothing left to verify (or keeps
+                        // misreading the evidence) shouldn't get stuck in a
+                        // nagging loop — the second attempt is let through
+                        // and marked `AnsweredUnverified` instead.
+                        verification_gate_used = true;
+                        self.set_state(TurnState::Verifying);
+                        messages.push(system_message(
+                            "You performed an action that changes state \
+                             without confirming the result afterwards. \
+                             Verify the outcome (e.g. look at the screenshot \
+                             or state already attached to that tool's \
+                             result, or take a new one) before answering."
+                                .to_string(),
+                        ));
+                        continue;
+                    }
+                    if unverified_mutation {
+                        self.events.emit(Event::AnsweredUnverified);
+                    }
+
                     self.set_state(TurnState::Responding);
                     self.transcript.push(
                         assistant_text_message(text.clone()),

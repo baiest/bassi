@@ -135,6 +135,106 @@ fn parses_tool_call_arguments() {
 }
 
 #[test]
+fn marks_execute_command_outcome_as_mutated() {
+    let computer = FakeComputer::new();
+    let tool = ExecuteCommandTool::new(computer);
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let tool_call = ToolCall {
+        name: "execute_command".to_string(),
+        arguments: r#"{"command":"start chrome"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
+}
+
+#[test]
+fn does_not_mark_ping_outcome_as_mutated() {
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::Ping(PingTool::new()));
+
+    let tool_call = ToolCall {
+        name: "ping".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(!outcome.mutated);
+}
+
+#[test]
+fn attaches_before_and_after_computer_state_to_execute_command() {
+    let computer = FakeComputer::new();
+    let tool = ExecuteCommandTool::new(computer);
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let tool_call = ToolCall {
+        name: "execute_command".to_string(),
+        arguments: r#"{"command":"start chrome"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    // FakeComputer's context doesn't change between the two snapshots, so
+    // this exercises the "unchanged" branch rather than a diff — the
+    // "changed" branch is exercised end-to-end by the real Windows adapter.
+    assert!(outcome.text.contains("State unchanged:"));
+}
+
+#[test]
+fn does_not_mark_computer_use_read_only_calls_as_mutated() {
+    let client = FakeMcpClient::new()
+        .with_tool("screenshot", "Take a screenshot")
+        .returning(McpToolResult {
+            text: "here is the screen".to_string(),
+            images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+        });
+    let toolset = ComputerUseToolset::connect(client, &["screenshot"]).unwrap();
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    dispatcher.register(Tools::ComputerUse(toolset));
+
+    let tool_call = ToolCall {
+        name: "screenshot".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(!outcome.mutated);
+}
+
+#[test]
+fn marks_computer_use_mutating_calls_as_mutated() {
+    let client = FakeMcpClient::new()
+        .with_tool("left_click", "Click the mouse")
+        .returning(McpToolResult {
+            text: "clicked".to_string(),
+            images: vec![],
+        });
+    let toolset = ComputerUseToolset::connect(client, &["left_click"]).unwrap();
+
+    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    dispatcher.register(Tools::ComputerUse(toolset));
+
+    let tool_call = ToolCall {
+        name: "left_click".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
+}
+
+#[test]
 fn dispatches_to_the_computer_use_toolset_and_carries_images_through() {
     let client = FakeMcpClient::new()
         .with_tool("screenshot", "Take a screenshot")

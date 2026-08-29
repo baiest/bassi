@@ -9,6 +9,7 @@ use nala::{
             computer_use::ComputerUseToolset,
             dispatcher::{ToolDispatcher, Tools},
             execute_command::ExecuteCommandTool,
+            ping::PingTool,
             registry::ToolRegistry,
         },
     },
@@ -25,9 +26,9 @@ use crate::{
         AnswersEmptyTwiceThenTextLlm, CallsScreenshotFiveTimesThenAnswersLlm,
         CallsScreenshotThenAnswersLlm, ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm,
         FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
-        FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, PlansThenExecutesLlm,
-        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm,
-        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, MutatesThenAnswersImmediatelyLlm,
+        MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
+        RepeatsSameToolCallLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
         RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
@@ -443,6 +444,12 @@ fn emits_turn_states_in_order() {
             TurnState::Thinking,
             TurnState::Executing,
             TurnState::Thinking,
+            // execute_command mutates; FakeLlm answers with text right
+            // after it without a follow-up call, so the verification gate
+            // fires once (Verifying) before the (still-unverified, but now
+            // let through) answer.
+            TurnState::Verifying,
+            TurnState::Thinking,
             TurnState::Responding,
         ]
     );
@@ -586,6 +593,95 @@ fn stops_when_cancelled_before_a_tool_call_runs() {
     assert_eq!(
         tool_starts, 0,
         "no tool should run once cancellation was already requested"
+    );
+}
+
+#[test]
+fn gates_an_unverified_mutation_then_lets_it_through_once() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        MutatesThenAnswersImmediatelyLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    let result = assistant.process("create a folder");
+    assert_eq!(
+        result.unwrap(),
+        "done",
+        "the second, still-unverified answer should be let through rather than looping forever"
+    );
+
+    let verifying_states = assistant
+        .events()
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::StateChanged {
+                    state: TurnState::Verifying
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        verifying_states, 1,
+        "expected exactly one verification-gate nudge"
+    );
+
+    let answered_unverified = assistant
+        .events()
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::AnsweredUnverified));
+    assert!(
+        answered_unverified,
+        "expected AnsweredUnverified once the gate let the second attempt through"
+    );
+}
+
+#[test]
+fn does_not_gate_when_a_mutation_was_followed_by_another_tool_call() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        MutatesThenChecksThenAnswersLlm::new(),
+        {
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
+                FakeComputer::new(),
+            )));
+            dispatcher.register(Tools::Ping(PingTool::new()));
+            dispatcher
+        },
+        {
+            let mut registry = registry();
+            registry.register(PingTool::definition());
+            registry
+        },
+        events,
+    );
+
+    let result = assistant.process("create a folder and check it");
+    assert_eq!(result.unwrap(), "done");
+
+    let gated = assistant.events().events.iter().any(|event| {
+        matches!(
+            event,
+            Event::StateChanged {
+                state: TurnState::Verifying
+            }
+        ) || matches!(event, Event::AnsweredUnverified)
+    });
+    assert!(
+        !gated,
+        "a tool call after the mutation should count as checking it, no gate expected"
     );
 }
 

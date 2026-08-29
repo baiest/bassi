@@ -46,6 +46,7 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
 
     const NAME: &'static str = "execute_command";
     const DESCRIPTION: &'static str = "Execute a command directly on the user's computer. Generate the command required to perform the user's requested action. The command is executed by the operating system shell. Use the appropriate command and syntax for the available operating system.";
+    const MUTATING: bool = true;
 
     fn parameters() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ExecuteCommandArgs))

@@ -670,3 +670,84 @@ impl Llm for HangsOnRealCallLlm {
         }
     }
 }
+
+/// Calls `execute_command` (a mutating tool) once, then answers with text
+/// immediately — never checking the result. Used to exercise the
+/// verification gate: the first such answer should be held back with a
+/// nudge, the second let through.
+#[derive(Default)]
+pub struct MutatesThenAnswersImmediatelyLlm {
+    calls: u32,
+}
+
+impl MutatesThenAnswersImmediatelyLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for MutatesThenAnswersImmediatelyLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 => Ok(LlmResponse::tool_call(ToolCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"mkdir test"}"#.to_string(),
+            })),
+            _ => Ok(LlmResponse::text("done")),
+        }
+    }
+}
+
+/// Calls `execute_command` (mutating), then `ping` (read-only, but still a
+/// tool call the model made to check its own work), then answers with
+/// text. Used to prove the gate only fires when the *most recent* action
+/// was an unverified mutation — any tool call after it, not necessarily a
+/// screenshot, clears that.
+#[derive(Default)]
+pub struct MutatesThenChecksThenAnswersLlm {
+    calls: u32,
+}
+
+impl MutatesThenChecksThenAnswersLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for MutatesThenChecksThenAnswersLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        let calls = self.calls;
+        self.calls += 1;
+
+        match calls {
+            0 => Ok(LlmResponse::tool_call(ToolCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"mkdir test"}"#.to_string(),
+            })),
+            1 => Ok(LlmResponse::tool_call(ToolCall {
+                name: "ping".to_string(),
+                arguments: "{}".to_string(),
+            })),
+            _ => Ok(LlmResponse::text("done")),
+        }
+    }
+}

@@ -16,6 +16,12 @@ pub trait Tool {
 
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
+    /// Whether calling this tool changes something on the user's computer.
+    /// Read-only tools (a screenshot, listing windows) leave this `false`;
+    /// tools that act (running a command, clicking, typing) set it `true`
+    /// so the dispatcher knows to attach evidence of the effect. See
+    /// `ToolOutcome::mutated`.
+    const MUTATING: bool = false;
 
     /// The JSON schema for `Args`, published to the LLM alongside the tool's
     /// name and description. Implementations should derive this from `Args`
