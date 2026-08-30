@@ -248,6 +248,37 @@ impl Llm for RepliesWithLlm {
     }
 }
 
+/// Always answers immediately with fixed text and a fixed, caller-provided
+/// `Usage` — used to assert exact token accounting downstream (e.g. in the
+/// CSV metrics sink) without depending on `Usage::default()`.
+pub struct RepliesWithUsageLlm {
+    text: String,
+    usage: nala::ports::llm::Usage,
+}
+
+impl RepliesWithUsageLlm {
+    pub fn new(text: &str, usage: nala::ports::llm::Usage) -> Self {
+        Self {
+            text: text.to_string(),
+            usage,
+        }
+    }
+}
+
+impl Llm for RepliesWithUsageLlm {
+    fn generate(
+        &mut self,
+        _messages: &[Message],
+        _tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        Ok(LlmResponse {
+            text: Some(self.text.clone()),
+            tool_calls: Vec::new(),
+            usage: self.usage,
+        })
+    }
+}
+
 #[derive(Default)]
 pub struct ResolvesInOneToolCallLlm {
     calls: u32,

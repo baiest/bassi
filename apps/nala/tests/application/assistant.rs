@@ -1,5 +1,6 @@
 use nala::{
     adapters::events::console::ConsoleEventSink,
+    adapters::metrics::csv_sink::CsvMetricsSink,
     application::{
         assistant::{Assistant, AssistantError},
         context_budget::ContextBudget,
@@ -14,6 +15,7 @@ use nala::{
         },
     },
     ports::events::{Event, TurnState},
+    ports::llm::Usage,
 };
 
 use crate::{
@@ -28,8 +30,9 @@ use crate::{
         FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
         FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, MutatesThenAnswersImmediatelyLlm,
         MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, RepliesWithLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm,
-        ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
+        RepeatsSameToolCallLlm, RepliesWithLlm, RepliesWithUsageLlm,
+        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
     fake_speech::SpySpeech,
@@ -1143,4 +1146,87 @@ fn speech_failure_does_not_break_the_turn() {
     let result = assistant.process("hola");
 
     assert_eq!(result.unwrap(), "ok");
+}
+
+/// A fresh, empty directory per test — no external tempfile crate needed,
+/// `CsvMetricsSink`'s own write path creates the directory if missing.
+fn metrics_temp_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "nala_assistant_metrics_test_{}_{n}",
+        std::process::id()
+    ))
+}
+
+fn read_csv(path: &std::path::Path) -> Vec<Vec<String>> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_path(path)
+        .unwrap_or_else(|error| panic!("could not read {}: {error}", path.display()));
+    reader
+        .records()
+        .map(|record| {
+            record
+                .unwrap()
+                .iter()
+                .map(|field| field.to_string())
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn csv_metrics_sink_records_a_real_task_end_to_end() {
+    // Exercises the real Assistant/agent_loop wiring through
+    // `CsvMetricsSink` (not hand-built events, unlike the sink's own unit
+    // tests in tests/adapters/metrics/csv_sink.rs), to prove it correctly
+    // consumes what the loop actually emits.
+    let dir = metrics_temp_dir();
+    let usage = Usage {
+        prompt_tokens: Some(42),
+        completion_tokens: Some(17),
+    };
+    let events = CsvMetricsSink::new(
+        RecordingEventSink::new(),
+        Some(dir.clone()),
+        "ollama",
+        "gemma4:12b",
+    );
+
+    let tool = ExecuteCommandTool::new(FakeComputer::new());
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ExecuteCommand(tool));
+
+    let mut assistant = Assistant::new(
+        RepliesWithUsageLlm::new("done", usage),
+        dispatcher,
+        registry(),
+        events,
+    );
+
+    let result = assistant.process("say something");
+    assert_eq!(result.unwrap(), "done");
+
+    let llm_rows = read_csv(&dir.join("llm_calls.csv"));
+    let data_rows = &llm_rows[1..];
+    assert!(!data_rows.is_empty());
+    let total_input: u32 = data_rows
+        .iter()
+        .map(|row| row[6].parse::<u32>().unwrap())
+        .sum();
+    let total_output: u32 = data_rows
+        .iter()
+        .map(|row| row[7].parse::<u32>().unwrap())
+        .sum();
+    assert_eq!(total_input, 42 * data_rows.len() as u32);
+    assert_eq!(total_output, 17 * data_rows.len() as u32);
+
+    let task_rows = read_csv(&dir.join("tasks.csv"));
+    assert_eq!(task_rows.len(), 2);
+    let row = &task_rows[1];
+    assert_eq!(row[4].parse::<u32>().unwrap(), data_rows.len() as u32);
+    assert_eq!(row[5].parse::<u32>().unwrap(), total_input);
+    assert_eq!(row[6].parse::<u32>().unwrap(), total_output);
+    assert_eq!(row[10], "ok");
 }

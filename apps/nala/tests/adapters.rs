@@ -64,6 +64,9 @@ mod piper;
 #[path = "adapters/mcp/stdio.rs"]
 mod mcp_stdio;
 
+#[path = "adapters/metrics/csv_sink.rs"]
+mod csv_metrics_sink;
+
 // Spawns a real `ping` process to prove a hung MCP server can't block
 // `read_line` forever — Windows-only: the deliberately-silent command it
 // spawns (`ping ... >NUL`) relies on `cmd /C` redirection, which only

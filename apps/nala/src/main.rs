@@ -8,6 +8,7 @@ use nala::adapters::events::speaking::SpeakingEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::mcp::child_process::ChildTransport;
 use nala::adapters::mcp::stdio::StdioMcpClient;
+use nala::adapters::metrics::csv_sink::CsvMetricsSink;
 use nala::adapters::process::windows::Windows as WindowsProcess;
 use nala::adapters::speech::async_speech::AsyncSpeech;
 use nala::adapters::speech::chatterbox::HttpChatterbox;
@@ -27,6 +28,7 @@ use nala::application::tools::ping::PingTool;
 use nala::application::tools::registry::ToolRegistry;
 use nala::cli::prompt::MultilineReader;
 use nala::ports::speech::{Speech, SpeechError};
+use std::path::PathBuf;
 
 type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
 type McpClientType = StdioMcpClient<ChildTransport>;
@@ -160,12 +162,18 @@ fn main() {
         }
     }
 
-    let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "gemma4:12b")
+    const OLLAMA_MODEL: &str = "gemma4:12b";
+    let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", OLLAMA_MODEL)
         .expect("Failed to create Ollama client");
 
     let (backend, _chatterbox_supervisor) = speech_backend();
     let speech = AsyncSpeech::new(backend);
     let events = SpeakingEventSink::new(ConsoleEventSink, TemplateNarrator::new(), speech.clone());
+    // Off by default (NALA_METRICS_DIR unset) so development runs and tests
+    // don't scatter CSV files on disk; set it to opt into per-task token
+    // accounting for later cost estimation (see apps/nala/src/plan.md).
+    let metrics_dir = std::env::var("NALA_METRICS_DIR").ok().map(PathBuf::from);
+    let events = CsvMetricsSink::new(events, metrics_dir, "ollama", OLLAMA_MODEL);
 
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut assistant = Assistant::new(llm, dispatcher, registry, events)
