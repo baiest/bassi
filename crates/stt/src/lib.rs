@@ -12,7 +12,7 @@ mod vad;
 mod wake;
 
 pub use capture::{CaptureError, RecordedAudio, WHISPER_SAMPLE_RATE, record_until_enter};
-pub use listener::{ListenError, Listener, ListenerConfig};
+pub use listener::{ListenError, Listener, ListenerConfig, ListenerStatus};
 pub use resample::Resampler;
 pub use ring::Ring;
 pub use session::{

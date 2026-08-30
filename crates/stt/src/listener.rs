@@ -7,6 +7,22 @@ use crate::wake::{WakeDetector, strip_wake_prefix};
 
 pub use crate::session::{ListenMode, Session, SessionConfig, SpeechGate};
 
+/// A point in `listen()`'s progress worth surfacing to a user watching a
+/// terminal — otherwise the whole pipeline is silent from the moment it
+/// starts until it returns a finished transcript, which looks identical
+/// whether it's idle, actively capturing, or stuck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerStatus {
+    /// Waiting for the wake phrase (or, in follow-up mode, for speech).
+    Listening,
+    /// The wake phrase (or follow-up speech onset) was just detected.
+    Heard,
+    /// Accumulating the utterance.
+    Capturing,
+    /// The utterance is complete; running it through Whisper.
+    Transcribing,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ListenError {
     #[error("audio source closed unexpectedly")]
@@ -61,6 +77,7 @@ pub struct Listener<A, V, W, T> {
     /// run its cold-start discard instead of the shorter post-speech
     /// settle window.
     first_call: bool,
+    on_status: Box<dyn FnMut(ListenerStatus)>,
 }
 
 impl<A, V, W, T> Listener<A, V, W, T>
@@ -90,7 +107,16 @@ where
             config,
             recent: Ring::with_capacity(recent_capacity * CHUNK_SAMPLES),
             first_call: true,
+            on_status: Box::new(|_| {}),
         }
+    }
+
+    /// Registers a callback fired on every [`ListenerStatus`] transition,
+    /// so a caller (a terminal UI, a log line) can show what the pipeline
+    /// is doing instead of it being silent until a transcript comes back.
+    pub fn with_status<F: FnMut(ListenerStatus) + 'static>(mut self, on_status: F) -> Self {
+        self.on_status = Box::new(on_status);
+        self
     }
 
     /// Blocks until a complete utterance is captured and transcribed.
@@ -113,6 +139,7 @@ where
         self.wake.reset();
         let mut capture: Vec<f32> = Vec::new();
         let mut chunk = [0.0_f32; CHUNK_SAMPLES];
+        (self.on_status)(ListenerStatus::Listening);
 
         loop {
             if !self.audio.next_chunk(&mut chunk) {
@@ -136,11 +163,15 @@ where
             match session.observe(speech, wake) {
                 Action::Idle => {}
                 Action::StartCapture => {
+                    (self.on_status)(ListenerStatus::Heard);
+                    (self.on_status)(ListenerStatus::Capturing);
                     capture.clear();
                     self.prepend_pre_roll(&mut capture, mode);
                     capture.extend_from_slice(&chunk);
                 }
                 Action::RestartCapture => {
+                    (self.on_status)(ListenerStatus::Heard);
+                    (self.on_status)(ListenerStatus::Capturing);
                     self.wake.reset();
                     capture.clear();
                     // A restart is always a wake-word self-correction —
@@ -154,6 +185,7 @@ where
                 }
                 Action::Complete => {
                     self.wake.reset();
+                    (self.on_status)(ListenerStatus::Transcribing);
                     let raw = self.transcriber.transcribe(&capture)?;
                     let text = strip_wake_prefix(&raw).to_string();
 
@@ -410,6 +442,33 @@ mod tests {
         assert_eq!(
             result, None,
             "a nonsense follow-up transcript must end the chain, not be surfaced"
+        );
+    }
+
+    #[test]
+    fn with_status_reports_the_expected_transitions_in_order() {
+        let (probabilities, chunks) = wake_triggered_sequence();
+        let vad = FakeVad::scripted(probabilities);
+        let audio = FakeAudioSource::silent(chunks);
+        let wake = FakeWake::firing_on_call(1);
+        let transcriber = FakeTranscribe::returning("oye nala que hora es");
+
+        let statuses = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorded = std::rc::Rc::clone(&statuses);
+
+        let mut listener = Listener::new(audio, vad, wake, transcriber, config())
+            .with_status(move |status| recorded.borrow_mut().push(status));
+
+        listener.listen(ListenMode::WakeWord).unwrap();
+
+        assert_eq!(
+            *statuses.borrow(),
+            vec![
+                ListenerStatus::Listening,
+                ListenerStatus::Heard,
+                ListenerStatus::Capturing,
+                ListenerStatus::Transcribing,
+            ]
         );
     }
 

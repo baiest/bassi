@@ -1,21 +1,28 @@
-use stt::ListenMode;
+use stt::{ListenMode, ListenerStatus};
 use tts::Speech;
 use voice::bootstrap;
 
 fn main() {
-    let (assistant, speech, _chatterbox_supervisor) = bootstrap::build();
-    let (mut assistant, cancel_signal) = nala::bootstrap::install_cancel_signal(assistant);
+    let (mut assistant, speech, _chatterbox_supervisor) = bootstrap::build();
 
     println!("Cargando el pipeline de escucha (VAD + wake word)...");
-    let mut listener = bootstrap::build_listener();
+    let listener = bootstrap::build_listener();
+    let mut listener = listener.with_status(|status| match status {
+        ListenerStatus::Listening => println!("👂 Escuchando... (decí 'oye Nala')"),
+        ListenerStatus::Heard => println!("🎙️  ¡Te escuché!"),
+        ListenerStatus::Capturing => {}
+        ListenerStatus::Transcribing => println!("🤔 Procesando..."),
+    });
 
     let greeting = "Hola, en que te puedo ayudar?";
     println!("{greeting}");
     let _ = speech.say(greeting);
 
-    // Ctrl+C cancels the current turn, not the process — closing the
-    // terminal is the exit path for an always-listening front end, same
-    // as any other voice assistant with no keyboard in the loop.
+    // No cancel-signal handler here on purpose: it would swallow every
+    // Ctrl+C to cancel the current turn instead, and with no keyboard
+    // left in this loop (unlike push-to-talk's "salir") that leaves no
+    // way to exit the process at all. Ctrl+C keeps its default OS
+    // behaviour instead — it just closes the app, same as any other CLI.
     let mut mode = ListenMode::WakeWord;
     loop {
         let heard = match listener.listen(mode) {
@@ -35,13 +42,6 @@ fn main() {
         };
 
         println!("Vos: {input}");
-
-        #[cfg(windows)]
-        if let Some(signal) = &cancel_signal {
-            signal.reset();
-        }
-        #[cfg(not(windows))]
-        let _ = &cancel_signal;
 
         match assistant.process(&input) {
             Ok(response) => {
