@@ -12,7 +12,7 @@ pub const CHUNK_SAMPLES: usize = 512;
 /// Milliseconds of audio in one chunk, at [`crate::WHISPER_SAMPLE_RATE`].
 pub const CHUNK_MS: usize = 32;
 
-const fn chunks_for_ms(ms: usize) -> u32 {
+pub(crate) const fn chunks_for_ms(ms: usize) -> u32 {
     (ms / CHUNK_MS) as u32
 }
 
