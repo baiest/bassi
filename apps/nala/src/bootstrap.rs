@@ -21,7 +21,9 @@ use crate::application::tools::mcp_toolset::McpToolset;
 use crate::application::tools::ping::PingTool;
 use crate::application::tools::registry::ToolRegistry;
 use crate::ports::events::EventSink;
+#[cfg(windows)]
 use crate::ports::llm::Llm;
+#[cfg(windows)]
 use crate::ports::tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOutcome};
 
 pub type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
