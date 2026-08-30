@@ -187,7 +187,7 @@ where
                     self.wake.reset();
                     (self.on_status)(ListenerStatus::Transcribing);
                     let raw = self.transcriber.transcribe(&capture)?;
-                    let text = strip_wake_prefix(&raw).to_string();
+                    let text = strip_wake_prefix(&raw);
 
                     if is_sane(&text) {
                         return Ok(Some(text));

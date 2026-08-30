@@ -78,10 +78,7 @@ impl<T: Transcribe> WhisperWake<T> {
     }
 
     fn is_wake_phrase(text: &str) -> bool {
-        let normalized = text.trim().to_lowercase();
-        WAKE_PHRASES
-            .iter()
-            .any(|phrase| normalized.starts_with(phrase))
+        matching_wake_phrase_len(&words_with_end_offsets(text)).is_some()
     }
 }
 
@@ -130,32 +127,61 @@ impl<T: Transcribe> WakeDetector for WhisperWake<T> {
 /// Whisper for the actual command starts shortly before the detection
 /// point, so "oye Nala" can still bleed into it, and Nala shouldn't
 /// receive her own wake phrase as part of the request.
-pub fn strip_wake_prefix(transcript: &str) -> &str {
-    let trimmed = transcript.trim_start_matches(|c: char| !c.is_alphanumeric());
+pub fn strip_wake_prefix(transcript: &str) -> String {
+    let words = words_with_end_offsets(transcript);
 
-    for phrase in WAKE_PHRASES {
-        if let Some(rest) = strip_prefix_ignoring_case(trimmed, phrase) {
-            return rest.trim_start_matches(|c: char| !c.is_alphanumeric());
+    match matching_wake_phrase_len(&words) {
+        Some(prefix_len) => {
+            let cut = words[prefix_len - 1].1;
+            transcript[cut..]
+                .trim_start_matches(|c: char| !c.is_alphanumeric())
+                .trim()
+                .to_string()
         }
+        None => transcript.trim().to_string(),
     }
-
-    transcript.trim()
 }
 
-fn strip_prefix_ignoring_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    let prefix_chars = prefix.chars().count();
-    let head: String = text
-        .chars()
-        .take(prefix_chars)
-        .collect::<String>()
-        .to_lowercase();
+/// Extracts the letters/digits-only, lowercased words in `text`, each
+/// paired with the byte offset immediately after it in the *original*
+/// string — punctuation-tolerant matching needs the normalized form, but
+/// [`strip_wake_prefix`] needs to cut the real transcript at the right
+/// point, preserving whatever casing/punctuation follows the phrase.
+fn words_with_end_offsets(text: &str) -> Vec<(String, usize)> {
+    let mut words = Vec::new();
+    let mut start: Option<usize> = None;
 
-    if head == prefix {
-        let byte_len: usize = text.chars().take(prefix_chars).map(char::len_utf8).sum();
-        Some(&text[byte_len..])
-    } else {
-        None
+    for (i, c) in text.char_indices() {
+        if c.is_alphanumeric() {
+            start.get_or_insert(i);
+        } else if let Some(s) = start.take() {
+            words.push((text[s..i].to_lowercase(), i));
+        }
     }
+    if let Some(s) = start {
+        words.push((text[s..].to_lowercase(), text.len()));
+    }
+
+    words
+}
+
+/// If `words` begins with one of [`WAKE_PHRASES`], returns how many words
+/// that phrase occupies.
+///
+/// Matching whole words rather than a literal substring is what makes this
+/// tolerant of whatever punctuation Whisper inserts — "Oye, Nala." and
+/// "oye nala" both match, where a plain `starts_with` would not.
+fn matching_wake_phrase_len(words: &[(String, usize)]) -> Option<usize> {
+    WAKE_PHRASES.iter().find_map(|phrase| {
+        let phrase_words: Vec<&str> = phrase.split(' ').collect();
+        let matches = words.len() >= phrase_words.len()
+            && phrase_words
+                .iter()
+                .enumerate()
+                .all(|(i, word)| words[i].0 == *word);
+
+        matches.then_some(phrase_words.len())
+    })
 }
 
 #[cfg(test)]
@@ -275,6 +301,18 @@ mod tests {
     #[test]
     fn strips_a_leading_wake_phrase() {
         assert_eq!(strip_wake_prefix("oye Nala, ¿qué hora es?"), "qué hora es?");
+    }
+
+    #[test]
+    fn tolerates_punctuation_whisper_inserts_between_words() {
+        // The exact transcript observed during manual testing: Whisper
+        // punctuates "oye Nala" as two words with a comma and a period,
+        // which a literal substring match would never recognize.
+        assert!(WhisperWake::<FakeTranscriber>::is_wake_phrase("Oye, Nala."));
+        assert_eq!(
+            strip_wake_prefix("Oye, Nala. ¿Qué hora es?"),
+            "Qué hora es?"
+        );
     }
 
     #[test]
