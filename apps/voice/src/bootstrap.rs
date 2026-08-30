@@ -90,9 +90,14 @@ pub fn build_listener() -> VoiceListener {
     println!("🎤 Micrófono: {}", audio.device_name());
 
     let vad = stt::SileroVad::new().expect("Failed to build the voice activity detector");
-    let wake = stt::WhisperWake::new(wake_transcriber).with_check_callback(|text| {
+    let wake = stt::WhisperWake::new(wake_transcriber).with_check_callback(|text, elapsed| {
         if !text.trim().is_empty() {
-            println!("👂 Escuché: \"{text}\"");
+            println!("👂 Escuché: \"{text}\" ({:.2}s)", elapsed.as_secs_f32());
+        } else {
+            println!(
+                "  [stt] wake check: {:.2}s (sin texto)",
+                elapsed.as_secs_f32()
+            );
         }
     });
 

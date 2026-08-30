@@ -201,7 +201,13 @@ where
                         (self.on_status)(ListenerStatus::MaxDurationReached);
                     }
                     (self.on_status)(ListenerStatus::Transcribing);
+                    let started = std::time::Instant::now();
                     let raw = self.transcriber.transcribe(&capture)?;
+                    eprintln!(
+                        "  [stt] transcripción final: {:.2}s ({} samples)",
+                        started.elapsed().as_secs_f32(),
+                        capture.len()
+                    );
                     let text = strip_wake_prefix(&raw);
 
                     if is_sane(&text) {

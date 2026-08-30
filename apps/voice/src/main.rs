@@ -7,19 +7,27 @@ fn main() {
 
     println!("Cargando el pipeline de escucha (VAD + wake word)...");
     let listener = bootstrap::build_listener();
-    let mut listener = listener.with_status(|status| match status {
-        ListenerStatus::Listening => println!("👂 Escuchando... (decí 'oye Nala')"),
-        ListenerStatus::Heard => println!("🎙️  ¡Te escuché!"),
-        ListenerStatus::Restarted => {
-            println!("🔁 Dijiste el prefijo de nuevo, reinicio la captura")
+    let mut listener = listener.with_status(|status| {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        print!("[{:.3}] ", ts.as_secs_f64());
+        match status {
+            ListenerStatus::Listening => println!("👂 Escuchando... (decí 'oye Nala')"),
+            ListenerStatus::Heard => println!("🎙️  ¡Te escuché!"),
+            ListenerStatus::Restarted => {
+                println!("🔁 Dijiste el prefijo de nuevo, reinicio la captura")
+            }
+            ListenerStatus::Capturing => println!("🎙️  Capturando..."),
+            ListenerStatus::MaxDurationReached => {
+                println!("⏱️  No detecté una pausa, corto acá y proceso igual")
+            }
+            ListenerStatus::Transcribing => println!("🤔 Procesando..."),
+            ListenerStatus::DiscardedTooShort => {
+                println!("🤏 Muy corto, descartado (sin transcribir)")
+            }
+            ListenerStatus::DiscardedNonsense => println!("🗑️  No entendí nada útil, descartado"),
         }
-        ListenerStatus::Capturing => {}
-        ListenerStatus::MaxDurationReached => {
-            println!("⏱️  No detecté una pausa, corto acá y proceso igual")
-        }
-        ListenerStatus::Transcribing => println!("🤔 Procesando..."),
-        ListenerStatus::DiscardedTooShort => println!("🤏 Muy corto, descartado (sin transcribir)"),
-        ListenerStatus::DiscardedNonsense => println!("🗑️  No entendí nada útil, descartado"),
     });
 
     let greeting = "Hola, en que te puedo ayudar?";

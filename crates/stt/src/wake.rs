@@ -39,6 +39,9 @@ const CHECK_INTERVAL_CHUNKS: usize = 25; // 800 ms at 32 ms/chunk
 /// cost) without bound. Sized for the longest wake phrase plus margin.
 const MAX_BUFFER_CHUNKS: usize = 63; // ~2 s
 
+/// A callback fired with the transcript and elapsed time of a wake check.
+type CheckCallback = Box<dyn FnMut(&str, std::time::Duration)>;
+
 /// Detects the wake phrase by transcribing accumulated audio and checking
 /// whether it starts with one of [`WAKE_PHRASES`].
 ///
@@ -53,11 +56,12 @@ pub struct WhisperWake<T: Transcribe> {
     transcriber: T,
     buffer: Vec<f32>,
     since_check: usize,
-    /// Fired with the raw transcript on every check, whether or not it
-    /// matched a wake phrase — otherwise a wake-triggered check that
-    /// doesn't match is invisible: nothing else in the pipeline reports
-    /// what was actually heard.
-    on_check: Box<dyn FnMut(&str)>,
+    /// Fired with the raw transcript and how long the transcription took,
+    /// on every check, whether or not it matched a wake phrase — otherwise
+    /// a wake-triggered check that doesn't match is invisible: nothing
+    /// else in the pipeline reports what was actually heard, or whether a
+    /// check is starting to fall behind the 800ms interval it runs at.
+    on_check: CheckCallback,
 }
 
 impl<T: Transcribe> WhisperWake<T> {
@@ -66,13 +70,16 @@ impl<T: Transcribe> WhisperWake<T> {
             transcriber,
             buffer: Vec::with_capacity(MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES),
             since_check: 0,
-            on_check: Box::new(|_| {}),
+            on_check: Box::new(|_, _| {}),
         }
     }
 
-    /// Registers a callback fired with the transcript of every wake-word
-    /// check, matched or not.
-    pub fn with_check_callback<F: FnMut(&str) + 'static>(mut self, on_check: F) -> Self {
+    /// Registers a callback fired with the transcript and elapsed time of
+    /// every wake-word check, matched or not.
+    pub fn with_check_callback<F: FnMut(&str, std::time::Duration) + 'static>(
+        mut self,
+        on_check: F,
+    ) -> Self {
         self.on_check = Box::new(on_check);
         self
     }
@@ -92,9 +99,13 @@ impl<T: Transcribe> WakeDetector for WhisperWake<T> {
         }
         self.since_check = 0;
 
-        let detected = match self.transcriber.transcribe(&self.buffer) {
+        let started = std::time::Instant::now();
+        let result = self.transcriber.transcribe(&self.buffer);
+        let elapsed = started.elapsed();
+
+        let detected = match result {
             Ok(text) => {
-                (self.on_check)(&text);
+                (self.on_check)(&text, elapsed);
                 Self::is_wake_phrase(&text)
             }
             // A transcription failure isn't a wake event, but it also
@@ -238,8 +249,10 @@ mod tests {
         let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let recorded = std::rc::Rc::clone(&heard);
 
-        let mut detector = WhisperWake::new(transcriber)
-            .with_check_callback(move |text| recorded.borrow_mut().push(text.to_string()));
+        let mut detector =
+            WhisperWake::new(transcriber).with_check_callback(move |text, _elapsed| {
+                recorded.borrow_mut().push(text.to_string())
+            });
 
         feed_chunks(&mut detector, CHECK_INTERVAL_CHUNKS);
 
