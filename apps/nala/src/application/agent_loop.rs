@@ -67,10 +67,12 @@ where
         let tool_definitions: Vec<ToolDefinition> =
             self.registry.definitions().into_iter().cloned().collect();
 
-        self.set_state(TurnState::Planning);
-        if let Some(plan) = self.build_plan(&messages, &tool_definitions) {
-            self.events.emit(Event::PlanCreated { plan: plan.clone() });
-            messages.push(assistant_text_message(format!("Plan:\n{plan}")));
+        if self.planning_enabled {
+            self.set_state(TurnState::Planning);
+            if let Some(plan) = self.build_plan(&messages, &tool_definitions) {
+                self.events.emit(Event::PlanCreated { plan: plan.clone() });
+                messages.push(assistant_text_message(format!("Plan:\n{plan}")));
+            }
         }
 
         // Everything built so far (persisted history, computer context,
