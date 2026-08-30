@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 // mainly) overrides it with `with_clock` / `with_token_counter`.
 use crate::adapters::clock::system::SystemClock;
 use crate::adapters::token_counter::heuristic::HeuristicTokenCounter;
+use crate::application::agent_loop::TaskState;
 use crate::application::context_budget::ContextBudget;
 use crate::application::loop_limits::LoopLimits;
 use crate::application::tools::registry::ToolRegistry;
@@ -61,6 +62,9 @@ pub struct Assistant<L, D, E> {
     pub(crate) budget: ContextBudget,
     pub(crate) speech: Option<Box<dyn Speech>>,
     pub(crate) planning_enabled: bool,
+    /// Identity and per-call counters for the task currently in
+    /// `process()`. Reset at the start of every call.
+    pub(crate) current_task: TaskState,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +110,7 @@ where
             budget: ContextBudget::from_env(),
             speech: None,
             planning_enabled: true,
+            current_task: TaskState::default(),
         }
     }
 

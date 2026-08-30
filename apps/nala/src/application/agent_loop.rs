@@ -9,7 +9,7 @@ use crate::application::assistant::{
     tool_result_message, user_message,
 };
 use crate::application::context_budget;
-use crate::ports::events::{BudgetStep, Event, EventSink, TurnState};
+use crate::ports::events::{BudgetStep, Event, EventSink, LlmCallId, TaskId, TurnState};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
 use crate::ports::tool::ToolDefinition;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
@@ -41,6 +41,39 @@ enum LlmCallOutcome {
     Cancelled,
 }
 
+/// Per-task identity and counters, for correlating every event a `process()`
+/// call emits (LLM calls, tool calls, completion) back to that task. Reset
+/// at the start of every `process()` call. Stored on `Assistant` rather than
+/// threaded as a parameter through every helper — safe because `process()`
+/// runs strictly sequentially: the `Arc<Mutex<L>>` on `Assistant` exists only
+/// so an in-flight call can be abandoned on cancellation, not to support
+/// concurrent tasks.
+pub(crate) struct TaskState {
+    id: TaskId,
+    next_call_index: u32,
+}
+
+impl TaskState {
+    fn new() -> Self {
+        Self {
+            id: TaskId::new(),
+            next_call_index: 0,
+        }
+    }
+
+    fn next_llm_call(&mut self) -> (LlmCallId, u32) {
+        self.next_call_index += 1;
+        let call_index = self.next_call_index;
+        (LlmCallId::new(&self.id, call_index), call_index)
+    }
+}
+
+impl Default for TaskState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<L, D, E> Assistant<L, D, E>
 where
     L: Llm + Send + 'static,
@@ -50,8 +83,11 @@ where
 {
     pub fn process(&mut self, input: &str) -> Result<String, AssistantError<LlmError, D::Error>> {
         let request_start = Instant::now();
+        self.current_task = TaskState::new();
 
-        self.events.emit(Event::RequestStarted);
+        self.events.emit(Event::RequestStarted {
+            task_id: self.task_id(),
+        });
         self.set_state(TurnState::Receiving);
 
         self.transcript.push(
@@ -70,7 +106,10 @@ where
         if self.planning_enabled {
             self.set_state(TurnState::Planning);
             if let Some(plan) = self.build_plan(&messages, &tool_definitions) {
-                self.events.emit(Event::PlanCreated { plan: plan.clone() });
+                self.events.emit(Event::PlanCreated {
+                    task_id: self.task_id(),
+                    plan: plan.clone(),
+                });
                 messages.push(assistant_text_message(format!("Plan:\n{plan}")));
             }
         }
@@ -132,6 +171,8 @@ where
                     let tool_args = tool_call.arguments.clone();
 
                     self.events.emit(Event::ToolStarted {
+                        task_id: self.task_id(),
+                        tool_call_index: tool_call_count as u32,
                         name: tool_name.clone(),
                         arguments: tool_args,
                     });
@@ -152,6 +193,8 @@ where
                     };
 
                     self.events.emit(Event::ToolCompleted {
+                        task_id: self.task_id(),
+                        tool_call_index: tool_call_count as u32,
                         name: tool_name.clone(),
                         duration,
                         output: outcome.text.clone(),
@@ -213,7 +256,9 @@ where
                         continue;
                     }
                     if unverified_mutation {
-                        self.events.emit(Event::AnsweredUnverified);
+                        self.events.emit(Event::AnsweredUnverified {
+                            task_id: self.task_id(),
+                        });
                     }
 
                     self.set_state(TurnState::Responding);
@@ -231,6 +276,7 @@ where
                         // splitting here would only add extra round-trips.
                         if let Err(error) = speech.say(&text) {
                             self.events.emit(Event::RequestFailed {
+                                task_id: self.task_id(),
                                 duration: request_start.elapsed(),
                                 error: error.to_string(),
                             });
@@ -238,7 +284,10 @@ where
                     }
 
                     let duration = request_start.elapsed();
-                    self.events.emit(Event::RequestCompleted { duration });
+                    self.events.emit(Event::RequestCompleted {
+                        task_id: self.task_id(),
+                        duration,
+                    });
 
                     break Ok(text);
                 }
@@ -288,6 +337,7 @@ where
                     }
 
                     self.events.emit(Event::Retrying {
+                        task_id: self.task_id(),
                         attempt: attempt + 1,
                         error: llm_error.to_string(),
                     });
@@ -315,8 +365,14 @@ where
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> LlmCallOutcome {
+        let task_id = self.task_id();
+        let (llm_call_id, call_index) = self.current_task.next_llm_call();
+
         let outgoing_images: usize = messages.iter().map(|message| message.images.len()).sum();
         self.events.emit(Event::LlmStarted {
+            task_id: task_id.clone(),
+            llm_call_id: llm_call_id.clone(),
+            call_index,
             images: outgoing_images,
         });
 
@@ -326,14 +382,25 @@ where
 
         match &outcome {
             LlmCallOutcome::Completed(Ok(response)) => {
-                self.events.emit(Event::LlmCompleted { duration });
+                self.events.emit(Event::LlmCompleted {
+                    task_id: task_id.clone(),
+                    llm_call_id: llm_call_id.clone(),
+                    call_index,
+                    duration,
+                });
                 self.events.emit(Event::TokensUsed {
+                    task_id,
+                    llm_call_id,
+                    call_index,
                     prompt_tokens: response.usage.prompt_tokens,
                     completion_tokens: response.usage.completion_tokens,
                 });
             }
             LlmCallOutcome::Completed(Err(error)) => {
                 self.events.emit(Event::LlmFailed {
+                    task_id,
+                    llm_call_id,
+                    call_index,
                     duration,
                     error: error.to_string(),
                 });
@@ -387,14 +454,26 @@ where
         }
     }
 
+    /// The current task's id, for attaching to every event `process()` (and
+    /// the helpers it calls) emits.
+    fn task_id(&self) -> TaskId {
+        self.current_task.id.clone()
+    }
+
     fn set_state(&mut self, state: TurnState) {
-        self.events.emit(Event::StateChanged { state });
+        self.events.emit(Event::StateChanged {
+            task_id: self.task_id(),
+            state,
+        });
     }
 
     fn cancelled(&mut self, request_start: Instant) -> AssistantError<LlmError, D::Error> {
         let duration = request_start.elapsed();
-        self.events.emit(Event::Cancelled);
+        self.events.emit(Event::Cancelled {
+            task_id: self.task_id(),
+        });
         self.events.emit(Event::RequestFailed {
+            task_id: self.task_id(),
             duration,
             error: "cancelled".to_string(),
         });
@@ -412,6 +491,7 @@ where
     {
         let duration = request_start.elapsed();
         self.events.emit(Event::RequestFailed {
+            task_id: self.task_id(),
             duration,
             error: reason.to_string(),
         });
@@ -481,6 +561,7 @@ where
         );
         if dropped_images > 0 {
             self.events.emit(Event::BudgetPressure {
+                task_id: self.task_id(),
                 step: BudgetStep::DroppedImages {
                     count: dropped_images,
                 },
@@ -499,6 +580,7 @@ where
         );
         if truncated > 0 {
             self.events.emit(Event::BudgetPressure {
+                task_id: self.task_id(),
                 step: BudgetStep::TruncatedText { count: truncated },
                 remaining_estimate: self.token_counter.estimate(messages),
             });
@@ -508,8 +590,10 @@ where
         }
 
         if let Some(turns_compacted) = self.compact(messages, protected_prefix) {
-            self.events
-                .emit(Event::TranscriptCompacted { turns_compacted });
+            self.events.emit(Event::TranscriptCompacted {
+                task_id: self.task_id(),
+                turns_compacted,
+            });
         }
         if self.token_counter.estimate(messages) <= available {
             return;
@@ -523,6 +607,7 @@ where
         );
         if dropped_turns > 0 {
             self.events.emit(Event::BudgetPressure {
+                task_id: self.task_id(),
                 step: BudgetStep::DroppedTurns {
                     count: dropped_turns,
                 },

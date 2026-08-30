@@ -90,9 +90,11 @@ impl Narrator for TemplateNarrator {
         match event {
             Event::StateChanged {
                 state: TurnState::Thinking,
+                ..
             } => self.pick("state:thinking", THINKING),
             Event::StateChanged {
                 state: TurnState::Verifying,
+                ..
             } => self.pick("state:verifying", VERIFYING),
             Event::StateChanged { .. } => None,
             Event::ToolStarted { name, .. } => {

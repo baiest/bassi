@@ -5,10 +5,10 @@ pub struct ConsoleEventSink;
 impl EventSink for ConsoleEventSink {
     fn emit(&mut self, event: crate::ports::events::Event) {
         match event {
-            Event::RequestStarted => {
+            Event::RequestStarted { .. } => {
                 println!("[REQUEST] started");
             }
-            Event::StateChanged { state } => {
+            Event::StateChanged { state, .. } => {
                 let label = match state {
                     TurnState::Receiving => "receiving",
                     TurnState::Planning => "planning",
@@ -19,37 +19,60 @@ impl EventSink for ConsoleEventSink {
                 };
                 println!("[STATE] {label}");
             }
-            Event::RequestCompleted { duration } => {
+            Event::RequestCompleted { duration, .. } => {
                 println!("[REQUEST] completed in {:?}\n", duration);
             }
 
-            Event::RequestFailed { duration, error } => {
+            Event::RequestFailed {
+                duration, error, ..
+            } => {
                 println!("[REQUEST] failed in {:?}: {}\n", duration, error);
             }
-            Event::PlanCreated { plan } => {
+            Event::PlanCreated { plan, .. } => {
                 println!("[PLAN]\n{plan}\n");
             }
-            Event::LlmStarted { images } => {
+            Event::LlmStarted {
+                call_index, images, ..
+            } => {
                 if images > 0 {
-                    println!("[LLM] started (with {images} image(s) attached)");
+                    println!("[LLM] call #{call_index} started (with {images} image(s) attached)");
                 } else {
-                    println!("[LLM] started");
+                    println!("[LLM] call #{call_index} started");
                 }
             }
-            Event::LlmCompleted { duration } => {
-                println!("[LLM] completed in {:?}\n", duration);
+            Event::LlmCompleted {
+                call_index,
+                duration,
+                ..
+            } => {
+                println!("[LLM] call #{call_index} completed in {:?}\n", duration);
             }
-            Event::LlmFailed { duration, error } => {
-                println!("[LLM] failed in {:?}: {}\n", duration, error);
+            Event::LlmFailed {
+                call_index,
+                duration,
+                error,
+                ..
+            } => {
+                println!(
+                    "[LLM] call #{call_index} failed in {:?}: {}\n",
+                    duration, error
+                );
             }
-            Event::ToolStarted { name, arguments } => {
-                println!("[TOOL] [{name}] started with arguments: {arguments}")
+            Event::ToolStarted {
+                tool_call_index,
+                name,
+                arguments,
+                ..
+            } => {
+                println!("[TOOL] #{tool_call_index} [{name}] started with arguments: {arguments}")
             }
             Event::ToolCompleted {
+                tool_call_index,
                 name,
                 duration,
                 output,
                 images,
+                ..
             } => {
                 let images_note = if images > 0 {
                     format!(" ({images} image(s))")
@@ -57,19 +80,21 @@ impl EventSink for ConsoleEventSink {
                     String::new()
                 };
                 println!(
-                    "[TOOL] [{name}] completed in {:?}{images_note}: {:?}\n",
+                    "[TOOL] #{tool_call_index} [{name}] completed in {:?}{images_note}: {:?}\n",
                     duration, output
                 )
             }
-            Event::Retrying { attempt, error } => {
+            Event::Retrying { attempt, error, .. } => {
                 println!("[RETRY] attempt {attempt} after error: {error}");
             }
-            Event::Cancelled => {
+            Event::Cancelled { .. } => {
                 println!("[CANCELLED] turn stopped\n");
             }
             Event::TokensUsed {
+                call_index,
                 prompt_tokens,
                 completion_tokens,
+                ..
             } => {
                 let prompt = prompt_tokens
                     .map(|tokens| tokens.to_string())
@@ -77,11 +102,12 @@ impl EventSink for ConsoleEventSink {
                 let completion = completion_tokens
                     .map(|tokens| tokens.to_string())
                     .unwrap_or_else(|| "?".to_string());
-                println!("[TOKENS] prompt={prompt} completion={completion}");
+                println!("[TOKENS] call #{call_index} prompt={prompt} completion={completion}");
             }
             Event::BudgetPressure {
                 step,
                 remaining_estimate,
+                ..
             } => {
                 let label = match step {
                     BudgetStep::DroppedImages { count } => format!("dropped {count} image(s)"),
@@ -92,10 +118,12 @@ impl EventSink for ConsoleEventSink {
                 };
                 println!("[BUDGET] {label}, ~{remaining_estimate} tokens remaining");
             }
-            Event::TranscriptCompacted { turns_compacted } => {
+            Event::TranscriptCompacted {
+                turns_compacted, ..
+            } => {
                 println!("[BUDGET] compacted {turns_compacted} old turn(s) into a summary\n");
             }
-            Event::AnsweredUnverified => {
+            Event::AnsweredUnverified { .. } => {
                 println!("[VERIFY] answered without checking the last action\n");
             }
         }

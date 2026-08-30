@@ -299,7 +299,7 @@ fn emits_events_showing_images_reached_the_tool_result_and_the_next_llm_call() {
     let llm_started_image_counts: Vec<usize> = events
         .iter()
         .filter_map(|event| match event {
-            Event::LlmStarted { images } => Some(*images),
+            Event::LlmStarted { images, .. } => Some(*images),
             _ => None,
         })
         .collect();
@@ -353,7 +353,7 @@ fn emits_plan_created_with_the_generated_plan() {
         .events
         .iter()
         .find_map(|event| match event {
-            Event::PlanCreated { plan } => Some(plan.clone()),
+            Event::PlanCreated { plan, .. } => Some(plan.clone()),
             _ => None,
         });
 
@@ -432,7 +432,7 @@ fn emits_turn_states_in_order() {
         .events
         .iter()
         .filter_map(|event| match event {
-            Event::StateChanged { state } => Some(*state),
+            Event::StateChanged { state, .. } => Some(*state),
             _ => None,
         })
         .collect();
@@ -627,7 +627,8 @@ fn gates_an_unverified_mutation_then_lets_it_through_once() {
             matches!(
                 event,
                 Event::StateChanged {
-                    state: TurnState::Verifying
+                    state: TurnState::Verifying,
+                    ..
                 }
             )
         })
@@ -641,7 +642,7 @@ fn gates_an_unverified_mutation_then_lets_it_through_once() {
         .events()
         .events
         .iter()
-        .any(|event| matches!(event, Event::AnsweredUnverified));
+        .any(|event| matches!(event, Event::AnsweredUnverified { .. }));
     assert!(
         answered_unverified,
         "expected AnsweredUnverified once the gate let the second attempt through"
@@ -676,9 +677,10 @@ fn does_not_gate_when_a_mutation_was_followed_by_another_tool_call() {
         matches!(
             event,
             Event::StateChanged {
-                state: TurnState::Verifying
+                state: TurnState::Verifying,
+                ..
             }
-        ) || matches!(event, Event::AnsweredUnverified)
+        ) || matches!(event, Event::AnsweredUnverified { .. })
     });
     assert!(
         !gated,
@@ -885,6 +887,172 @@ fn a_failed_llm_call_emits_llm_failed_not_request_failed() {
         "a bare LLM-call failure shouldn't also emit RequestFailed \
          (that's reserved for task-level abort/cancellation)"
     );
+}
+
+#[test]
+fn every_event_in_a_task_shares_the_same_task_id() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    fn task_id_of(event: &Event) -> &nala::ports::events::TaskId {
+        match event {
+            Event::RequestStarted { task_id }
+            | Event::StateChanged { task_id, .. }
+            | Event::RequestCompleted { task_id, .. }
+            | Event::RequestFailed { task_id, .. }
+            | Event::PlanCreated { task_id, .. }
+            | Event::LlmStarted { task_id, .. }
+            | Event::LlmCompleted { task_id, .. }
+            | Event::LlmFailed { task_id, .. }
+            | Event::ToolStarted { task_id, .. }
+            | Event::ToolCompleted { task_id, .. }
+            | Event::Retrying { task_id, .. }
+            | Event::Cancelled { task_id }
+            | Event::TokensUsed { task_id, .. }
+            | Event::BudgetPressure { task_id, .. }
+            | Event::TranscriptCompacted { task_id, .. }
+            | Event::AnsweredUnverified { task_id } => task_id,
+        }
+    }
+
+    let events = &assistant.events().events;
+    assert!(!events.is_empty());
+    let first_task_id = task_id_of(&events[0]);
+    for event in events {
+        assert_eq!(
+            task_id_of(event),
+            first_task_id,
+            "every event in one process() call should share its task_id"
+        );
+    }
+}
+
+#[test]
+fn two_process_calls_produce_distinct_task_ids() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+    let first_task_id = match &assistant.events().events[0] {
+        Event::RequestStarted { task_id } => task_id.clone(),
+        other => panic!("expected RequestStarted, got {other:?}"),
+    };
+
+    assistant.process("open chrome").unwrap();
+    let events = &assistant.events().events;
+    let second_task_id = match events
+        .iter()
+        .rev()
+        .find(|event| matches!(event, Event::RequestStarted { .. }))
+        .unwrap()
+    {
+        Event::RequestStarted { task_id } => task_id.clone(),
+        _ => unreachable!(),
+    };
+
+    assert_ne!(
+        first_task_id, second_task_id,
+        "each process() call should get its own task_id"
+    );
+}
+
+#[test]
+fn llm_call_index_is_sequential_across_the_whole_task_including_planning() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    let call_indices: Vec<u32> = assistant
+        .events()
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::LlmStarted { call_index, .. } => Some(*call_index),
+            _ => None,
+        })
+        .collect();
+
+    let expected: Vec<u32> = (1..=call_indices.len() as u32).collect();
+    assert_eq!(
+        call_indices, expected,
+        "call_index should run 1..N without gaps or repeats, planning included"
+    );
+}
+
+#[test]
+fn tool_events_carry_the_task_id_and_a_sequential_tool_call_index() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        ChainsDistinctToolCallsThenAnswersLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    let result = assistant.process("do a multi-step task");
+    assert_eq!(result.unwrap(), "done");
+
+    let started_task_id = match &assistant.events().events[0] {
+        Event::RequestStarted { task_id } => task_id.clone(),
+        other => panic!("expected RequestStarted, got {other:?}"),
+    };
+
+    let tool_indices: Vec<u32> = assistant
+        .events()
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::ToolStarted {
+                task_id,
+                tool_call_index,
+                ..
+            } => {
+                assert_eq!(task_id, &started_task_id);
+                Some(*tool_call_index)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(tool_indices, vec![1, 2]);
 }
 
 #[test]
