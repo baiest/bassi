@@ -4,7 +4,7 @@ use std::sync::mpsc;
 
 use nala::adapters::events::speaking::SpeakingEventSink;
 use nala::adapters::speech::async_speech::AsyncSpeech;
-use nala::ports::events::{Event, EventSink};
+use nala::ports::events::{Event, EventSink, LlmCallId, TaskId};
 use nala::ports::narrator::Narrator;
 use nala::ports::speech::{Speech, SpeechError};
 
@@ -67,12 +67,19 @@ fn forwards_every_event_to_the_inner_sink_unchanged() {
 
     let mut sink = SpeakingEventSink::new(recorder, narrator, speech);
 
-    sink.emit(Event::RequestStarted);
-    sink.emit(Event::Cancelled);
+    sink.emit(Event::RequestStarted {
+        task_id: TaskId::new(),
+    });
+    sink.emit(Event::Cancelled {
+        task_id: TaskId::new(),
+    });
 
     assert_eq!(sink.inner().events.len(), 2);
-    assert!(matches!(sink.inner().events[0], Event::RequestStarted));
-    assert!(matches!(sink.inner().events[1], Event::Cancelled));
+    assert!(matches!(
+        sink.inner().events[0],
+        Event::RequestStarted { .. }
+    ));
+    assert!(matches!(sink.inner().events[1], Event::Cancelled { .. }));
 }
 
 #[test]
@@ -84,7 +91,9 @@ fn speaks_the_phrase_the_narrator_returns() {
     let speech = AsyncSpeech::new(Box::new(backend));
 
     let mut sink = SpeakingEventSink::new(recorder, narrator, speech.clone());
-    sink.emit(Event::RequestStarted);
+    sink.emit(Event::RequestStarted {
+        task_id: TaskId::new(),
+    });
     speech.flush();
 
     assert_eq!(spy.spoken(), vec!["hola".to_string()]);
@@ -99,7 +108,13 @@ fn stays_silent_when_the_narrator_has_nothing_to_say() {
     let speech = AsyncSpeech::new(Box::new(backend));
 
     let mut sink = SpeakingEventSink::new(recorder, narrator, speech.clone());
-    sink.emit(Event::LlmStarted { images: 0 });
+    let task_id = TaskId::new();
+    sink.emit(Event::LlmStarted {
+        llm_call_id: LlmCallId::new(&task_id, 1),
+        task_id,
+        call_index: 1,
+        images: 0,
+    });
     speech.flush();
 
     assert!(spy.spoken().is_empty());
@@ -119,8 +134,12 @@ fn narration_uses_the_disposable_path_not_the_never_drop_one() {
     let speech = AsyncSpeech::new(Box::new(backend));
 
     let mut sink = SpeakingEventSink::new(recorder, narrator, speech.clone());
-    for _ in 0..50 {
+    for i in 0..50 {
+        let task_id = TaskId::new();
         sink.emit(Event::LlmCompleted {
+            llm_call_id: LlmCallId::new(&task_id, i),
+            task_id,
+            call_index: i,
             duration: std::time::Duration::from_millis(1),
         });
     }
