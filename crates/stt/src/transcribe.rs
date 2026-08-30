@@ -8,6 +8,16 @@ pub enum TranscribeError {
     Transcription(String),
 }
 
+/// Turns audio samples into text.
+///
+/// A trait so anything built on top of it — the wake detector, the
+/// listener — can be tested with a scripted fake instead of a real,
+/// multi-hundred-megabyte model.
+pub trait Transcribe {
+    /// `samples` must be mono at [`crate::WHISPER_SAMPLE_RATE`].
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError>;
+}
+
 /// Wraps a loaded whisper.cpp model. Loading is slow (reads the whole
 /// model file), so build one `Transcriber` once and reuse it across turns
 /// rather than loading per call.
@@ -54,5 +64,11 @@ impl Transcriber {
         }
 
         Ok(text.trim().to_string())
+    }
+}
+
+impl Transcribe for Transcriber {
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError> {
+        Transcriber::transcribe(self, samples)
     }
 }
