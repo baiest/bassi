@@ -27,6 +27,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install system audio dev libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Check LF line endings
         run: bash scripts/check_lf.sh
 
@@ -49,6 +52,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Install system audio dev libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
