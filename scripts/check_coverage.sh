@@ -54,8 +54,11 @@ fi
 # microphone/input device, which CI doesn't have. transcribe.rs is
 # excluded for the same reason as chatterbox/supervisor.rs and
 # piper/speech.rs: it needs a real Whisper model file, which is
-# gigabytes and gitignored, not something CI downloads.
-IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|crates[/\\]stt[/\\]src[/\\](capture|transcribe)\.rs$|cli[/\\]prompt\.rs$'
+# gigabytes and gitignored, not something CI downloads. vad.rs is a thin
+# wrapper over ONNX Runtime, which CI doesn't provide either; the logic
+# built on top of it (session.rs, ring.rs, resample.rs) is pure and stays
+# fully measured.
+IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|crates[/\\]stt[/\\]src[/\\](capture|transcribe|vad)\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 

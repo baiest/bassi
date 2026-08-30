@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 cpal = "0.15"
 thiserror = { workspace = true }
+voice_activity_detector = "0.2"
 whisper-rs = "0.12"
 
 [dev-dependencies]
