@@ -48,7 +48,7 @@ impl Default for SessionConfig {
         Self {
             hangover: chunks_for_ms(800),
             follow_up_window: chunks_for_ms(15_000),
-            max_utterance: chunks_for_ms(20_000),
+            max_utterance: chunks_for_ms(15_000),
             min_utterance: chunks_for_ms(400),
             settle: chunks_for_ms(400),
             cold_start: chunks_for_ms(320),
@@ -80,6 +80,13 @@ pub enum Action {
     RestartCapture,
     /// The utterance is complete; transcribe it.
     Complete,
+    /// The utterance hit `max_utterance` without enough silence to end it
+    /// naturally — transcribe what was captured anyway, but this is worth
+    /// telling apart from a normal hangover-triggered `Complete`: it means
+    /// the VAD never saw a real pause, which usually means background
+    /// noise is keeping it latched rather than the user actually still
+    /// talking.
+    CompleteMaxDuration,
     /// The utterance was too short to be worth transcribing; discard it.
     Discard,
     /// A follow-up window expired without any speech.
@@ -234,7 +241,7 @@ impl Session {
             // Hand over what we have rather than dropping it: losing the
             // tail of a long utterance beats losing all of it.
             self.enter(State::Idle);
-            return Action::Complete;
+            return Action::CompleteMaxDuration;
         }
 
         if self.silence >= self.config.hangover {
@@ -345,7 +352,7 @@ mod tests {
         SessionConfig {
             hangover: 3,
             follow_up_window: 5,
-            max_utterance: 10,
+            max_utterance: 20,
             min_utterance: 2,
             settle: 2,
             cold_start: 2,
@@ -483,7 +490,7 @@ mod tests {
         // Talk forever; the cap must fire before any hangover does.
         let mut actions = observe_n(&mut session, config().max_utterance - 1, true, false);
 
-        assert_eq!(actions.pop(), Some(Action::Complete));
+        assert_eq!(actions.pop(), Some(Action::CompleteMaxDuration));
     }
 
     #[test]

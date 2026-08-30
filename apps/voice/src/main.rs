@@ -14,6 +14,9 @@ fn main() {
             println!("🔁 Dijiste el prefijo de nuevo, reinicio la captura")
         }
         ListenerStatus::Capturing => {}
+        ListenerStatus::MaxDurationReached => {
+            println!("⏱️  No detecté una pausa, corto acá y proceso igual")
+        }
         ListenerStatus::Transcribing => println!("🤔 Procesando..."),
         ListenerStatus::DiscardedTooShort => println!("🤏 Muy corto, descartado (sin transcribir)"),
         ListenerStatus::DiscardedNonsense => println!("🗑️  No entendí nada útil, descartado"),

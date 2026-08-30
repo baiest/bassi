@@ -24,6 +24,10 @@ pub enum ListenerStatus {
     Capturing,
     /// The utterance is complete; running it through Whisper.
     Transcribing,
+    /// The utterance hit its maximum duration without a real pause to end
+    /// it naturally — almost always background noise keeping the VAD
+    /// latched, not the user still talking. Transcribed anyway.
+    MaxDurationReached,
     /// The utterance ended but was too short to be worth transcribing
     /// (below `min_utterance`) — discarded without calling Whisper.
     DiscardedTooShort,
@@ -191,8 +195,11 @@ where
                 Action::Capture => {
                     capture.extend_from_slice(&chunk);
                 }
-                Action::Complete => {
+                action @ (Action::Complete | Action::CompleteMaxDuration) => {
                     self.wake.reset();
+                    if action == Action::CompleteMaxDuration {
+                        (self.on_status)(ListenerStatus::MaxDurationReached);
+                    }
                     (self.on_status)(ListenerStatus::Transcribing);
                     let raw = self.transcriber.transcribe(&capture)?;
                     let text = strip_wake_prefix(&raw);
