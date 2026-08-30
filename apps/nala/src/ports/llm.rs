@@ -25,6 +25,14 @@ pub struct Usage {
     pub completion_tokens: Option<u32>,
 }
 
+impl Usage {
+    /// `prompt_tokens + completion_tokens`, or `None` if either is unknown —
+    /// never guesses a total from a partial count.
+    pub fn total_tokens(&self) -> Option<u32> {
+        Some(self.prompt_tokens? + self.completion_tokens?)
+    }
+}
+
 /// A single LLM turn. `tool_calls` may hold more than one entry — a model
 /// can request several actions in one response (e.g. "screenshot" won't do
 /// that, but many models batch independent calls) — and the loop executes
@@ -94,4 +102,39 @@ pub trait Llm {
         messages: &[Message],
         tools: &[&ToolDefinition],
     ) -> Result<LlmResponse, LlmError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Usage;
+
+    #[test]
+    fn total_tokens_sums_both_known_counts() {
+        let usage = Usage {
+            prompt_tokens: Some(10),
+            completion_tokens: Some(5),
+        };
+        assert_eq!(usage.total_tokens(), Some(15));
+    }
+
+    #[test]
+    fn total_tokens_is_none_when_either_count_is_unknown() {
+        assert_eq!(
+            Usage {
+                prompt_tokens: None,
+                completion_tokens: Some(5),
+            }
+            .total_tokens(),
+            None
+        );
+        assert_eq!(
+            Usage {
+                prompt_tokens: Some(10),
+                completion_tokens: None,
+            }
+            .total_tokens(),
+            None
+        );
+        assert_eq!(Usage::default().total_tokens(), None);
+    }
 }
