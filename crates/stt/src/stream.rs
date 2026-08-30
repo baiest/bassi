@@ -41,6 +41,7 @@ pub struct MicStream {
     // capture. Never read directly.
     _stream: cpal::Stream,
     ring: Arc<Mutex<Ring>>,
+    device_name: String,
 }
 
 impl MicStream {
@@ -49,6 +50,11 @@ impl MicStream {
         let device = host
             .default_input_device()
             .ok_or(CaptureError::NoInputDevice)?;
+        // Best-effort: a device that refuses to report its own name still
+        // works, it just can't be named back to the user.
+        let device_name = device
+            .name()
+            .unwrap_or_else(|_| "<dispositivo sin nombre>".to_string());
         let config = device
             .default_input_config()
             .map_err(|e| CaptureError::StreamBuild(e.to_string()))?;
@@ -96,7 +102,15 @@ impl MicStream {
         Ok(Self {
             _stream: stream,
             ring,
+            device_name,
         })
+    }
+
+    /// The name of the input device actually opened — not necessarily
+    /// what the caller expected, since this is always whatever the OS
+    /// currently has set as the default recording device.
+    pub fn device_name(&self) -> &str {
+        &self.device_name
     }
 }
 

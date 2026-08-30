@@ -53,6 +53,11 @@ pub struct WhisperWake<T: Transcribe> {
     transcriber: T,
     buffer: Vec<f32>,
     since_check: usize,
+    /// Fired with the raw transcript on every check, whether or not it
+    /// matched a wake phrase — otherwise a wake-triggered check that
+    /// doesn't match is invisible: nothing else in the pipeline reports
+    /// what was actually heard.
+    on_check: Box<dyn FnMut(&str)>,
 }
 
 impl<T: Transcribe> WhisperWake<T> {
@@ -61,7 +66,15 @@ impl<T: Transcribe> WhisperWake<T> {
             transcriber,
             buffer: Vec::with_capacity(MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES),
             since_check: 0,
+            on_check: Box::new(|_| {}),
         }
+    }
+
+    /// Registers a callback fired with the transcript of every wake-word
+    /// check, matched or not.
+    pub fn with_check_callback<F: FnMut(&str) + 'static>(mut self, on_check: F) -> Self {
+        self.on_check = Box::new(on_check);
+        self
     }
 
     fn is_wake_phrase(text: &str) -> bool {
@@ -83,7 +96,10 @@ impl<T: Transcribe> WakeDetector for WhisperWake<T> {
         self.since_check = 0;
 
         let detected = match self.transcriber.transcribe(&self.buffer) {
-            Ok(text) => Self::is_wake_phrase(&text),
+            Ok(text) => {
+                (self.on_check)(&text);
+                Self::is_wake_phrase(&text)
+            }
             // A transcription failure isn't a wake event, but it also
             // isn't grounds to stop listening — treat it as silence.
             Err(_) => false,
@@ -188,6 +204,20 @@ mod tests {
             }
         }
         detected
+    }
+
+    #[test]
+    fn with_check_callback_reports_every_transcript_even_without_a_match() {
+        let transcriber = FakeTranscriber::returning(vec!["ruido de fondo"]);
+        let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorded = std::rc::Rc::clone(&heard);
+
+        let mut detector = WhisperWake::new(transcriber)
+            .with_check_callback(move |text| recorded.borrow_mut().push(text.to_string()));
+
+        feed_chunks(&mut detector, CHECK_INTERVAL_CHUNKS);
+
+        assert_eq!(*heard.borrow(), vec!["ruido de fondo".to_string()]);
     }
 
     #[test]

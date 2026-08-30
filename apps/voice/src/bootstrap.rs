@@ -64,8 +64,14 @@ pub fn build_listener() -> VoiceListener {
         Arc::new(stt::Transcriber::load(&model_path).expect("Failed to load Whisper model"));
 
     let audio = stt::MicStream::open().expect("Failed to open microphone");
+    println!("🎤 Micrófono: {}", audio.device_name());
+
     let vad = stt::SileroVad::new().expect("Failed to build the voice activity detector");
-    let wake = stt::WhisperWake::new(Arc::clone(&transcriber));
+    let wake = stt::WhisperWake::new(Arc::clone(&transcriber)).with_check_callback(|text| {
+        if !text.trim().is_empty() {
+            println!("👂 Escuché: \"{text}\"");
+        }
+    });
 
     stt::Listener::new(
         audio,
