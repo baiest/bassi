@@ -153,3 +153,29 @@ fn say_does_not_block_the_caller() {
     speech.flush();
     thread::sleep(Duration::from_millis(1));
 }
+
+#[test]
+fn is_speaking_reports_true_while_a_message_is_in_flight() {
+    let (backend, release) = BlockingSpeech::new();
+    let speech = AsyncSpeech::new(Box::new(backend));
+
+    assert!(!speech.is_speaking(), "nothing queued yet");
+
+    speech.say("hello").unwrap();
+    // The worker picks the message up and blocks on the gate almost
+    // immediately; poll briefly instead of asserting the exact instant,
+    // to avoid a race against the worker thread's scheduling.
+    let became_true = (0..50).any(|_| {
+        let speaking = speech.is_speaking();
+        if !speaking {
+            thread::sleep(Duration::from_millis(2));
+        }
+        speaking
+    });
+    assert!(became_true, "expected is_speaking to become true");
+
+    release.send(()).unwrap();
+    speech.flush();
+
+    assert!(!speech.is_speaking(), "cleared once the message is spoken");
+}

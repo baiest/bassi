@@ -72,6 +72,19 @@ impl AsyncSpeech {
         self.enqueue(text);
     }
 
+    /// Whether anything is queued or currently being spoken.
+    ///
+    /// The always-listening pipeline (BAS-25) gates the microphone on
+    /// this: reading audio while Nala is speaking would let her hear her
+    /// own voice and wake herself. It drops to `false` the instant the
+    /// last message finishes, before the acoustic tail has actually left
+    /// the speaker, so callers still need their own short settle window
+    /// after this clears — this only rules out the far larger risk of
+    /// reading the microphone throughout an entire turn's narration.
+    pub fn is_speaking(&self) -> bool {
+        self.pending.load(Ordering::SeqCst) > 0
+    }
+
     /// Blocks until every message enqueued so far has been spoken.
     pub fn flush(&self) {
         let (ack_tx, ack_rx) = mpsc::channel();
