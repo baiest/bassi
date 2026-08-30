@@ -50,6 +50,14 @@ pub enum Event {
     LlmCompleted {
         duration: Duration,
     },
+    /// A single LLM call failed — as opposed to `RequestFailed`, which marks
+    /// the whole task giving up. One task can retry several failed calls
+    /// (or absorb one in `build_plan`/`compact`, both non-fatal) without the
+    /// task itself failing, so the two need separate events.
+    LlmFailed {
+        duration: Duration,
+        error: String,
+    },
 
     ToolStarted {
         name: String,
