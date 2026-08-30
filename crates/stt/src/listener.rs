@@ -17,10 +17,19 @@ pub enum ListenerStatus {
     Listening,
     /// The wake phrase (or follow-up speech onset) was just detected.
     Heard,
+    /// The wake phrase fired again mid-capture (a self-correction, "oye
+    /// Nala... ey Nala, ..."), discarding what had been captured so far.
+    Restarted,
     /// Accumulating the utterance.
     Capturing,
     /// The utterance is complete; running it through Whisper.
     Transcribing,
+    /// The utterance ended but was too short to be worth transcribing
+    /// (below `min_utterance`) — discarded without calling Whisper.
+    DiscardedTooShort,
+    /// A capture transcribed to something empty or meaningless (a stray
+    /// word, a hallucinated filler on near-silence) and was rejected.
+    DiscardedNonsense,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -170,8 +179,7 @@ where
                     capture.extend_from_slice(&chunk);
                 }
                 Action::RestartCapture => {
-                    (self.on_status)(ListenerStatus::Heard);
-                    (self.on_status)(ListenerStatus::Capturing);
+                    (self.on_status)(ListenerStatus::Restarted);
                     self.wake.reset();
                     capture.clear();
                     // A restart is always a wake-word self-correction —
@@ -192,6 +200,7 @@ where
                     if is_sane(&text) {
                         return Ok(Some(text));
                     }
+                    (self.on_status)(ListenerStatus::DiscardedNonsense);
                     // A well-formed but meaningless capture (a cough
                     // Whisper turns into a stray word, a hallucinated
                     // filler phrase on near-silence). In WakeWord mode
@@ -204,6 +213,7 @@ where
                     capture.clear();
                 }
                 Action::Discard => {
+                    (self.on_status)(ListenerStatus::DiscardedTooShort);
                     self.wake.reset();
                     capture.clear();
                 }

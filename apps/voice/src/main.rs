@@ -10,8 +10,13 @@ fn main() {
     let mut listener = listener.with_status(|status| match status {
         ListenerStatus::Listening => println!("👂 Escuchando... (decí 'oye Nala')"),
         ListenerStatus::Heard => println!("🎙️  ¡Te escuché!"),
+        ListenerStatus::Restarted => {
+            println!("🔁 Dijiste el prefijo de nuevo, reinicio la captura")
+        }
         ListenerStatus::Capturing => {}
         ListenerStatus::Transcribing => println!("🤔 Procesando..."),
+        ListenerStatus::DiscardedTooShort => println!("🤏 Muy corto, descartado (sin transcribir)"),
+        ListenerStatus::DiscardedNonsense => println!("🗑️  No entendí nada útil, descartado"),
     });
 
     let greeting = "Hola, en que te puedo ayudar?";
