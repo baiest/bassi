@@ -5,6 +5,7 @@ mod capture;
 mod resample;
 mod ring;
 mod session;
+mod stream;
 mod transcribe;
 mod vad;
 mod wake;
@@ -15,6 +16,7 @@ pub use ring::Ring;
 pub use session::{
     Action, CHUNK_MS, CHUNK_SAMPLES, ListenMode, Session, SessionConfig, SpeechGate,
 };
+pub use stream::{AudioSource, MicStream};
 pub use transcribe::{Transcribe, TranscribeError, Transcriber};
 pub use vad::{SileroVad, VadError, VoiceDetector};
 pub use wake::{WAKE_PHRASES, WakeDetector, WhisperWake, strip_wake_prefix};
