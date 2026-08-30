@@ -25,10 +25,10 @@ pub struct ChildTransport {
     lines: mpsc::Receiver<std::io::Result<String>>,
     timeout: Duration,
     /// Kept alive only to be dropped (and so kill the whole process group)
-    /// after `child` on `ChildTransport::drop`. See `job_object`'s docs for
+    /// after `child` on `ChildTransport::drop`. See `process_group`'s docs for
     /// why `child.kill()` alone isn't enough on Windows.
     #[cfg(windows)]
-    _job: Option<crate::adapters::job_object::ProcessGroup>,
+    _job: Option<process_group::ProcessGroup>,
 }
 
 impl ChildTransport {
@@ -52,7 +52,7 @@ impl ChildTransport {
         // Created before spawning so the child can be assigned to it right
         // away, before it has a chance to spawn its own children.
         #[cfg(windows)]
-        let job = crate::adapters::job_object::ProcessGroup::new().ok();
+        let job = process_group::ProcessGroup::new().ok();
 
         let mut child = command
             .stdin(Stdio::piped())

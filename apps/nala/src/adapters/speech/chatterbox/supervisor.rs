@@ -6,7 +6,7 @@ use crate::ports::speech::SpeechError;
 use super::config::ChatterboxConfig;
 
 #[cfg(windows)]
-use crate::adapters::job_object::ProcessGroup;
+use process_group::ProcessGroup;
 
 /// What to do about the Chatterbox server, given whether it already
 /// answers `/health` and whether autostart is allowed. Pulled out as a

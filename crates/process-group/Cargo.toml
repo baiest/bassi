@@ -1,0 +1,7 @@
+[package]
+name = "process-group"
+version = "0.1.0"
+edition = "2024"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }

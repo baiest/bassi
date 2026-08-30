@@ -70,3 +70,42 @@ impl Drop for ProcessGroup {
         unsafe { CloseHandle(self.handle) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn creates_a_job_object() {
+        assert!(ProcessGroup::new().is_ok());
+    }
+
+    #[test]
+    fn dropping_the_group_kills_an_assigned_child() {
+        let group = ProcessGroup::new().expect("job object");
+        let mut child = Command::new("cmd")
+            .args(["/C", "timeout /T 30"])
+            .spawn()
+            .expect("spawn child");
+
+        group.assign(&child).expect("assign child to job");
+        drop(group);
+
+        // Closing the job handle kills the process, but Windows needs a
+        // moment to tear it down; poll instead of asserting immediately.
+        let mut killed = false;
+        for _ in 0..50 {
+            if let Ok(Some(_)) = child.try_wait() {
+                killed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        if !killed {
+            let _ = child.kill();
+        }
+        assert!(killed, "child process was not killed when the job closed");
+    }
+}

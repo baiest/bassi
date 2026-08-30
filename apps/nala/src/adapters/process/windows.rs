@@ -55,7 +55,7 @@ impl Process for Windows {
         // timeout kills the whole tree, not just the immediate child. Same
         // rationale as `adapters/mcp/child_process.rs`.
         #[cfg(windows)]
-        let job = crate::adapters::job_object::ProcessGroup::new().ok();
+        let job = process_group::ProcessGroup::new().ok();
         #[cfg(windows)]
         if let Some(job) = &job {
             let _ = job.assign(&child);
