@@ -101,6 +101,11 @@ impl Narrator for TemplateNarrator {
                 self.pick(&key, bank)
             }
             Event::Retrying { .. } => self.pick("retry", RETRYING),
+            // A failed LLM call is silent on its own: it's either about to
+            // be retried (already narrated via `Retrying` above) or the
+            // whole request is giving up, which speaks for itself once the
+            // turn ends.
+            Event::LlmFailed { .. } => None,
             Event::ToolCompleted { output, .. } if output.starts_with("ERROR:") => {
                 self.pick("tool_error", TOOL_ERROR)
             }

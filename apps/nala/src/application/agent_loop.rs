@@ -296,13 +296,25 @@ where
     fn generate(&mut self, messages: &[Message]) -> LlmCallOutcome {
         let tools: Vec<ToolDefinition> = self.registry.definitions().into_iter().cloned().collect();
 
+        self.instrumented_call_llm(messages.to_vec(), tools)
+    }
+
+    /// The single point where an LLM call is both made and instrumented —
+    /// every caller (`generate`, `build_plan`, `compact`) routes through
+    /// here, so `LlmStarted`/`LlmCompleted`/`TokensUsed`/`LlmFailed` are
+    /// emitted uniformly regardless of which one initiated the call.
+    fn instrumented_call_llm(
+        &mut self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> LlmCallOutcome {
         let outgoing_images: usize = messages.iter().map(|message| message.images.len()).sum();
         self.events.emit(Event::LlmStarted {
             images: outgoing_images,
         });
 
         let start = Instant::now();
-        let outcome = self.call_llm(messages.to_vec(), tools);
+        let outcome = self.call_llm(messages, tools);
         let duration = start.elapsed();
 
         match &outcome {
@@ -314,7 +326,7 @@ where
                 });
             }
             LlmCallOutcome::Completed(Err(error)) => {
-                self.events.emit(Event::RequestFailed {
+                self.events.emit(Event::LlmFailed {
                     duration,
                     error: error.to_string(),
                 });
@@ -427,16 +439,12 @@ where
             "Available tools:\n{tool_summary}\n\n{PLANNING_INSTRUCTIONS}"
         )));
 
-        self.events.emit(Event::LlmStarted { images: 0 });
-        let start = Instant::now();
-        let outcome = self.call_llm(planning_messages, Vec::new());
-        let duration = start.elapsed();
+        let outcome = self.instrumented_call_llm(planning_messages, Vec::new());
 
         let response = match outcome {
             LlmCallOutcome::Completed(Ok(response)) => response,
             LlmCallOutcome::Completed(Err(_)) | LlmCallOutcome::Cancelled => return None,
         };
-        self.events.emit(Event::LlmCompleted { duration });
 
         match response.text {
             Some(plan) if !plan.trim().is_empty() => Some(plan),
@@ -540,7 +548,7 @@ where
                 .to_string(),
         ));
 
-        let outcome = self.call_llm(summarize_messages, Vec::new());
+        let outcome = self.instrumented_call_llm(summarize_messages, Vec::new());
         let summary = match outcome {
             LlmCallOutcome::Completed(Ok(response)) => response.text?,
             LlmCallOutcome::Completed(Err(_)) | LlmCallOutcome::Cancelled => return None,

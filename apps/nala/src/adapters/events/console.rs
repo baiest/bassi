@@ -39,6 +39,9 @@ impl EventSink for ConsoleEventSink {
             Event::LlmCompleted { duration } => {
                 println!("[LLM] completed in {:?}\n", duration);
             }
+            Event::LlmFailed { duration, error } => {
+                println!("[LLM] failed in {:?}: {}\n", duration, error);
+            }
             Event::ToolStarted { name, arguments } => {
                 println!("[TOOL] [{name}] started with arguments: {arguments}")
             }

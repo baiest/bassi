@@ -770,6 +770,124 @@ fn emits_tokens_used_after_a_completed_llm_call() {
 }
 
 #[test]
+fn emits_tokens_used_for_the_planning_call_too() {
+    // FakeLlm's planning branch (tools.is_empty()), its tool-call round, and
+    // its final-text round each hit `generate` — plus one more: the
+    // execute_command tool mutates, so the verification gate holds the
+    // first text answer back and forces one extra round before letting it
+    // through. Four LLM calls in total for "open chrome". Every one of
+    // them should produce a TokensUsed event, not just the ones the main
+    // loop makes directly.
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    let tokens_used_count = assistant
+        .events()
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::TokensUsed { .. }))
+        .count();
+    assert_eq!(
+        tokens_used_count, 4,
+        "expected the planning call to also produce a TokensUsed event"
+    );
+}
+
+#[test]
+fn instruments_the_summarization_call_made_by_compaction() {
+    // Same setup as `compacts_old_turns_into_a_summary_once_the_budget_is_exceeded`,
+    // but this asserts the summarization call itself (made from `compact`,
+    // via `call_llm` directly today) is instrumented like any other LLM
+    // call: planning + the tool-call round + the compaction summary + the
+    // final answer round is 4 calls total.
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        RequestsTwoToolCallsAtOnceThenAnswersLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    )
+    .with_budget(ContextBudget {
+        max_tokens: 5,
+        output_reserve: 0,
+        keep_recent_uncompacted: 0,
+        ..ContextBudget::default()
+    });
+
+    let result = assistant.process("run two commands");
+    assert_eq!(result.unwrap(), "done");
+
+    let llm_completed_count = assistant
+        .events()
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::LlmCompleted { .. }))
+        .count();
+    assert!(
+        llm_completed_count >= 4,
+        "expected the compaction summary call to also emit LlmCompleted, got {llm_completed_count}"
+    );
+}
+
+#[test]
+fn a_failed_llm_call_emits_llm_failed_not_request_failed() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FailingLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    )
+    .with_limits(LoopLimits {
+        max_llm_retries: 0,
+        ..LoopLimits::default()
+    });
+
+    let result = assistant.process("open chrome");
+    assert!(matches!(result, Err(AssistantError::Llm(_))));
+
+    let llm_failed = assistant
+        .events()
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::LlmFailed { .. }));
+    assert!(llm_failed, "expected a failed LLM call to emit LlmFailed");
+
+    let request_failed = assistant
+        .events()
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::RequestFailed { .. }));
+    assert!(
+        !request_failed,
+        "a bare LLM-call failure shouldn't also emit RequestFailed \
+         (that's reserved for task-level abort/cancellation)"
+    );
+}
+
+#[test]
 fn compacts_old_turns_into_a_summary_once_the_budget_is_exceeded() {
     // A very small budget with generous keep_recent_uncompacted forces
     // fit_to_budget past the deterministic steps (no images, nothing long
