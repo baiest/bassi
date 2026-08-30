@@ -3,6 +3,7 @@
 //! it. `main.rs` only runs the result.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
@@ -40,12 +41,37 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
     (assistant, speech, chatterbox_supervisor)
 }
 
-/// Loads the Whisper model once at startup. Loading is slow (reads the
-/// whole model file), so `main` builds one `Transcriber` and reuses it
-/// across turns rather than reloading it per turn.
-pub fn build_transcriber() -> stt::Transcriber {
+type VoiceListener = stt::Listener<
+    stt::MicStream,
+    stt::SileroVad,
+    stt::WhisperWake<Arc<stt::Transcriber>>,
+    Arc<stt::Transcriber>,
+>;
+
+/// Opens the microphone and builds the full always-listening pipeline:
+/// VAD, wake-word detection and final-command transcription share one
+/// loaded model (an `Arc<Transcriber>` — `Transcribe` only needs `&self`,
+/// so this needs no lock) rather than loading it twice.
+///
+/// `NALA_WHISPER_MODEL` defaults to `base`, not `tiny`: measured on a real
+/// recording, `tiny` mistranscribed "Nala" as "mala" — too unreliable for
+/// telling the assistant from the user's cat, who is also named Nala. See
+/// BAS-25 for the measurement.
+pub fn build_listener() -> VoiceListener {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
         .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+    let transcriber =
+        Arc::new(stt::Transcriber::load(&model_path).expect("Failed to load Whisper model"));
 
-    stt::Transcriber::load(&model_path).expect("Failed to load Whisper model")
+    let audio = stt::MicStream::open().expect("Failed to open microphone");
+    let vad = stt::SileroVad::new().expect("Failed to build the voice activity detector");
+    let wake = stt::WhisperWake::new(Arc::clone(&transcriber));
+
+    stt::Listener::new(
+        audio,
+        vad,
+        wake,
+        transcriber,
+        stt::ListenerConfig::default(),
+    )
 }

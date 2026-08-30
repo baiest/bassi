@@ -72,3 +72,12 @@ impl Transcribe for Transcriber {
         Transcriber::transcribe(self, samples)
     }
 }
+
+/// Lets one loaded model be shared between the wake detector and the
+/// final-command transcription without loading it twice — `Transcribe`
+/// only needs `&self`, so an `Arc` is enough, no lock required.
+impl<T: Transcribe> Transcribe for std::sync::Arc<T> {
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError> {
+        T::transcribe(self, samples)
+    }
+}
