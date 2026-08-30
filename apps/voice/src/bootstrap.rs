@@ -48,34 +48,49 @@ type VoiceListener = stt::Listener<
     Arc<stt::Transcriber>,
 >;
 
-/// Opens the microphone and builds the full always-listening pipeline:
-/// VAD, wake-word detection and final-command transcription share one
-/// loaded model (an `Arc<Transcriber>` — `Transcribe` only needs `&self`,
-/// so this needs no lock) rather than loading it twice.
+/// Opens the microphone and builds the full always-listening pipeline.
 ///
-/// `NALA_WHISPER_MODEL` defaults to `base`, not `tiny`: measured on a real
-/// recording, `tiny` mistranscribed "Nala" as "mala" — too unreliable for
-/// telling the assistant from the user's cat, who is also named Nala. See
-/// BAS-25 for the measurement.
+/// Wake-word checking and final-command transcription use *different*
+/// loaded models on purpose: the wake check runs every 800ms on a growing
+/// buffer, so it needs to be fast, while the final transcription only runs
+/// once per utterance and needs to be accurate. Sharing one model (as an
+/// earlier version of this did) meant `base` was slow enough on CPU that a
+/// wake check could take longer than the 800ms interval it's supposed to
+/// run at — the mic kept recording into the ring the whole time, so by the
+/// time a check returned, the next one was already working with stale
+/// audio. It looked like the pipeline had stopped listening.
+///
+/// `NALA_WHISPER_WAKE_MODEL` defaults to `tiny` for that reason.
+/// `NALA_WHISPER_MODEL` (the final-transcription model) still defaults to
+/// `base`, not `tiny`: measured on a real recording, `tiny` mistranscribed
+/// "Nala" as "mala" on its own — too unreliable for telling the assistant
+/// from the user's cat, who is also named Nala. See BAS-25 for the
+/// measurement. `set_initial_prompt` in `Transcriber::transcribe` biases
+/// *both* models toward "Nala", which is what makes `tiny` acceptable for
+/// the wake check despite that earlier finding.
 pub fn build_listener() -> VoiceListener {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
         .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+    let wake_model_path = std::env::var("NALA_WHISPER_WAKE_MODEL")
+        .unwrap_or_else(|_| "data/whisper/ggml-tiny.bin".to_string());
     // whisper.cpp's own startup log (which would otherwise show the model
     // size/type) is silenced in Transcriber::load, so this is the only
-    // visible confirmation of which model actually got loaded — including
+    // visible confirmation of which models actually got loaded — including
     // an env var left over from an earlier session, which is exactly the
-    // kind of thing that turns "slow" into "looks broken": `small` runs
-    // slower than real time and the wake check falls further and further
-    // behind the microphone with every check.
-    println!("🧠 Modelo Whisper: {model_path}");
+    // kind of thing that turns "slow" into "looks broken".
+    println!("🧠 Modelo Whisper (comando): {model_path}");
+    println!("🧠 Modelo Whisper (wake word): {wake_model_path}");
     let transcriber =
         Arc::new(stt::Transcriber::load(&model_path).expect("Failed to load Whisper model"));
+    let wake_transcriber = Arc::new(
+        stt::Transcriber::load(&wake_model_path).expect("Failed to load Whisper wake model"),
+    );
 
     let audio = stt::MicStream::open().expect("Failed to open microphone");
     println!("🎤 Micrófono: {}", audio.device_name());
 
     let vad = stt::SileroVad::new().expect("Failed to build the voice activity detector");
-    let wake = stt::WhisperWake::new(Arc::clone(&transcriber)).with_check_callback(|text| {
+    let wake = stt::WhisperWake::new(wake_transcriber).with_check_callback(|text| {
         if !text.trim().is_empty() {
             println!("👂 Escuché: \"{text}\"");
         }
