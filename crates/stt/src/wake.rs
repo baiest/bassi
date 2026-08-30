@@ -1,3 +1,6 @@
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::time::{Duration, Instant};
+
 use crate::transcribe::Transcribe;
 
 /// The wake phrases Nala answers to.
@@ -40,10 +43,22 @@ const CHECK_INTERVAL_CHUNKS: usize = 25; // 800 ms at 32 ms/chunk
 const MAX_BUFFER_CHUNKS: usize = 63; // ~2 s
 
 /// A callback fired with the transcript and elapsed time of a wake check.
-type CheckCallback = Box<dyn FnMut(&str, std::time::Duration)>;
+type CheckCallback = Box<dyn FnMut(&str, Duration)>;
 
-/// Detects the wake phrase by transcribing accumulated audio and checking
-/// whether it starts with one of [`WAKE_PHRASES`].
+struct WakeJob {
+    generation: u64,
+    samples: Vec<f32>,
+}
+
+struct WakeResult {
+    generation: u64,
+    text: String,
+    elapsed: Duration,
+}
+
+/// Detects the wake phrase by transcribing accumulated audio on a
+/// dedicated background thread and checking whether it starts with one of
+/// [`WAKE_PHRASES`].
 ///
 /// This is the second stage of the cascade: only fed while the VAD says
 /// someone is talking, so it costs nothing in a quiet room. It trades a
@@ -52,34 +67,76 @@ type CheckCallback = Box<dyn FnMut(&str, std::time::Duration)>;
 /// bajate de la mesa" by what was actually said. See BAS-25 for why: every
 /// wake-word crate evaluated either needed a trained model with no
 /// Spanish/custom-phrase option, or has an unmaintained Rust SDK.
-pub struct WhisperWake<T: Transcribe> {
-    transcriber: T,
+///
+/// Transcription runs on its own thread rather than blocking `detect()`:
+/// `detect()` is called once per audio chunk from the same loop that reads
+/// the microphone, so if it blocked for the ~1s+ a check can take, the mic
+/// would keep filling its ring the whole time and the pipeline would spend
+/// the next several checks processing stale, backlogged audio instead of
+/// what's actually being said right now. `detect()` only ever sends a job
+/// and polls for a finished one — never waits.
+pub struct WhisperWake<T> {
     buffer: Vec<f32>,
     since_check: usize,
     /// Fired with the raw transcript and how long the transcription took,
     /// on every check, whether or not it matched a wake phrase — otherwise
     /// a wake-triggered check that doesn't match is invisible: nothing
-    /// else in the pipeline reports what was actually heard, or whether a
-    /// check is starting to fall behind the 800ms interval it runs at.
+    /// else in the pipeline reports what was actually heard.
     on_check: CheckCallback,
+    to_worker: SyncSender<WakeJob>,
+    from_worker: Receiver<WakeResult>,
+    /// Bumped on every [`WakeDetector::reset`], so a result the worker
+    /// finishes *after* a reset (audio from a phrase that's already been
+    /// abandoned) is recognized as stale and discarded instead of firing a
+    /// detection against unrelated, later audio.
+    generation: u64,
+    check_in_flight: bool,
+    _transcriber: std::marker::PhantomData<T>,
 }
 
-impl<T: Transcribe> WhisperWake<T> {
+impl<T: Transcribe + Send + 'static> WhisperWake<T> {
     pub fn new(transcriber: T) -> Self {
+        // Capacity 1: at most one check in flight, and `try_send` never
+        // blocks — if the worker is still busy, `detect` just skips
+        // sending a new job this interval rather than queuing one up.
+        let (to_worker, job_rx) = mpsc::sync_channel::<WakeJob>(1);
+        let (result_tx, from_worker) = mpsc::channel::<WakeResult>();
+
+        std::thread::spawn(move || {
+            while let Ok(job) = job_rx.recv() {
+                let started = Instant::now();
+                let text = transcriber
+                    .transcribe(&job.samples)
+                    .unwrap_or_else(|_| String::new());
+                let elapsed = started.elapsed();
+                if result_tx
+                    .send(WakeResult {
+                        generation: job.generation,
+                        text,
+                        elapsed,
+                    })
+                    .is_err()
+                {
+                    return; // WhisperWake was dropped; nobody's listening.
+                }
+            }
+        });
+
         Self {
-            transcriber,
             buffer: Vec::with_capacity(MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES),
             since_check: 0,
             on_check: Box::new(|_, _| {}),
+            to_worker,
+            from_worker,
+            generation: 0,
+            check_in_flight: false,
+            _transcriber: std::marker::PhantomData,
         }
     }
 
     /// Registers a callback fired with the transcript and elapsed time of
     /// every wake-word check, matched or not.
-    pub fn with_check_callback<F: FnMut(&str, std::time::Duration) + 'static>(
-        mut self,
-        on_check: F,
-    ) -> Self {
+    pub fn with_check_callback<F: FnMut(&str, Duration) + 'static>(mut self, on_check: F) -> Self {
         self.on_check = Box::new(on_check);
         self
     }
@@ -87,44 +144,76 @@ impl<T: Transcribe> WhisperWake<T> {
     fn is_wake_phrase(text: &str) -> bool {
         matching_wake_phrase_len(&words_with_end_offsets(text)).is_some()
     }
-}
 
-impl<T: Transcribe> WakeDetector for WhisperWake<T> {
-    fn detect(&mut self, chunk: &[f32]) -> bool {
-        self.buffer.extend_from_slice(chunk);
-        self.since_check += 1;
+    /// Applies a finished check's result: reports it, and matches it
+    /// against the wake phrases if it isn't stale.
+    fn handle_result(&mut self, result: WakeResult) -> bool {
+        self.check_in_flight = false;
+        if result.generation != self.generation {
+            return false; // From before a reset; the audio it covers is gone.
+        }
 
+        (self.on_check)(&result.text, result.elapsed);
+        if Self::is_wake_phrase(&result.text) {
+            self.buffer.clear();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Sends the current buffer off for transcription if the interval has
+    /// elapsed and nothing is already in flight. Never blocks.
+    fn maybe_start_check(&mut self) {
         if self.since_check < CHECK_INTERVAL_CHUNKS {
-            return false;
+            return;
         }
         self.since_check = 0;
+
+        if self.check_in_flight {
+            // The previous check hasn't come back yet — skip this one
+            // rather than queuing a second, so the worker is never asked
+            // to catch up on backlogged checks either.
+            return;
+        }
 
         eprintln!(
             "  [stt] wake: transcribiendo {} samples...",
             self.buffer.len()
         );
-        let started = std::time::Instant::now();
-        let result = self.transcriber.transcribe(&self.buffer);
-        let elapsed = started.elapsed();
-
-        let detected = match result {
-            Ok(text) => {
-                (self.on_check)(&text, elapsed);
-                Self::is_wake_phrase(&text)
-            }
-            // A transcription failure isn't a wake event, but it also
-            // isn't grounds to stop listening — treat it as silence.
-            Err(_) => false,
+        let job = WakeJob {
+            generation: self.generation,
+            samples: self.buffer.clone(),
         };
+        match self.to_worker.try_send(job) {
+            Ok(()) => self.check_in_flight = true,
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
+        }
+    }
 
-        if detected {
-            self.buffer.clear();
-        } else if self.buffer.len() > MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES {
-            // Nothing detected and the buffer is past its cap: drop the
-            // oldest audio rather than growing forever or re-checking the
-            // same stale prefix on every future chunk.
+    fn trim_buffer_if_over_cap(&mut self) {
+        if self.buffer.len() > MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES {
             let excess = self.buffer.len() - MAX_BUFFER_CHUNKS * crate::CHUNK_SAMPLES;
             self.buffer.drain(..excess);
+        }
+    }
+}
+
+impl<T: Transcribe + Send + 'static> WakeDetector for WhisperWake<T> {
+    fn detect(&mut self, chunk: &[f32]) -> bool {
+        self.buffer.extend_from_slice(chunk);
+        self.since_check += 1;
+
+        let mut detected = false;
+        while let Ok(result) = self.from_worker.try_recv() {
+            if self.handle_result(result) {
+                detected = true;
+            }
+        }
+
+        self.maybe_start_check();
+        if !detected {
+            self.trim_buffer_if_over_cap();
         }
 
         detected
@@ -133,6 +222,8 @@ impl<T: Transcribe> WakeDetector for WhisperWake<T> {
     fn reset(&mut self) {
         self.buffer.clear();
         self.since_check = 0;
+        self.generation += 1;
+        self.check_in_flight = false;
     }
 }
 
@@ -203,44 +294,55 @@ fn matching_wake_phrase_len(words: &[(String, usize)]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::transcribe::TranscribeError;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     /// A scripted `Transcribe` that returns canned text and records what
-    /// it was asked to transcribe.
+    /// it was asked to transcribe. `Mutex`, not `RefCell`: it's moved onto
+    /// `WhisperWake`'s worker thread, so it must be `Send`.
     struct FakeTranscriber {
-        responses: RefCell<std::collections::VecDeque<Result<String, TranscribeError>>>,
-        calls: RefCell<Vec<usize>>,
+        responses: Mutex<std::collections::VecDeque<Result<String, TranscribeError>>>,
     }
 
     impl FakeTranscriber {
         fn returning(responses: Vec<&str>) -> Self {
             Self {
-                responses: RefCell::new(
+                responses: Mutex::new(
                     responses
                         .into_iter()
                         .map(|text| Ok(text.to_string()))
                         .collect(),
                 ),
-                calls: RefCell::new(Vec::new()),
             }
         }
     }
 
     impl Transcribe for FakeTranscriber {
-        fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError> {
-            self.calls.borrow_mut().push(samples.len());
+        fn transcribe(&self, _samples: &[f32]) -> Result<String, TranscribeError> {
             self.responses
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .pop_front()
                 .unwrap_or_else(|| Ok(String::new()))
         }
     }
 
+    /// Feeds `count` chunks, waiting (with a generous timeout) for the
+    /// background worker's result whenever a check interval elapses, so
+    /// tests stay deterministic despite transcription now happening on
+    /// another thread.
     fn feed_chunks(detector: &mut WhisperWake<FakeTranscriber>, count: usize) -> bool {
         let chunk = vec![0.0_f32; crate::CHUNK_SAMPLES];
         let mut detected = false;
-        for _ in 0..count {
+        for i in 0..count {
             if detector.detect(&chunk) {
+                detected = true;
+            }
+            let just_sent = (i + 1) % CHECK_INTERVAL_CHUNKS == 0;
+            if just_sent
+                && detector.check_in_flight
+                && let Ok(result) = detector.from_worker.recv_timeout(Duration::from_secs(2))
+                && detector.handle_result(result)
+            {
                 detected = true;
             }
         }
@@ -250,17 +352,17 @@ mod tests {
     #[test]
     fn with_check_callback_reports_every_transcript_even_without_a_match() {
         let transcriber = FakeTranscriber::returning(vec!["ruido de fondo"]);
-        let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let recorded = std::rc::Rc::clone(&heard);
+        let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let recorded = std::sync::Arc::clone(&heard);
 
         let mut detector =
             WhisperWake::new(transcriber).with_check_callback(move |text, _elapsed| {
-                recorded.borrow_mut().push(text.to_string())
+                recorded.lock().unwrap().push(text.to_string())
             });
 
         feed_chunks(&mut detector, CHECK_INTERVAL_CHUNKS);
 
-        assert_eq!(*heard.borrow(), vec!["ruido de fondo".to_string()]);
+        assert_eq!(*heard.lock().unwrap(), vec!["ruido de fondo".to_string()]);
     }
 
     #[test]
@@ -292,10 +394,9 @@ mod tests {
     #[test]
     fn ignores_a_transcription_failure_instead_of_erroring() {
         let transcriber = FakeTranscriber {
-            responses: RefCell::new(
+            responses: Mutex::new(
                 vec![Err(TranscribeError::Transcription("boom".to_string()))].into(),
             ),
-            calls: RefCell::new(Vec::new()),
         };
         let mut detector = WhisperWake::new(transcriber);
 
