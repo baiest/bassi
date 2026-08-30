@@ -60,6 +60,14 @@ type VoiceListener = stt::Listener<
 pub fn build_listener() -> VoiceListener {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
         .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+    // whisper.cpp's own startup log (which would otherwise show the model
+    // size/type) is silenced in Transcriber::load, so this is the only
+    // visible confirmation of which model actually got loaded — including
+    // an env var left over from an earlier session, which is exactly the
+    // kind of thing that turns "slow" into "looks broken": `small` runs
+    // slower than real time and the wake check falls further and further
+    // behind the microphone with every check.
+    println!("🧠 Modelo Whisper: {model_path}");
     let transcriber =
         Arc::new(stt::Transcriber::load(&model_path).expect("Failed to load Whisper model"));
 
