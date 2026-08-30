@@ -27,6 +27,14 @@ pub struct Transcriber {
 
 impl Transcriber {
     pub fn load(model_path: &str) -> Result<Self, TranscribeError> {
+        // whisper.cpp otherwise prints its own verbose decoder/allocation
+        // logs straight to stdout on every call, drowning out anything
+        // this crate's callers print. Routes them through the `log` crate
+        // instead, where they're silently dropped without a registered
+        // logger — exactly what a CLI with no logging setup wants. Safe
+        // to call once per process even with multiple `Transcriber`s.
+        whisper_rs::install_whisper_log_trampoline();
+
         let context =
             WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
                 .map_err(|e| TranscribeError::ModelLoad(model_path.to_string(), e.to_string()))?;

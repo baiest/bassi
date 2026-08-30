@@ -17,6 +17,13 @@ fn main() {
     let greeting = "Hola, en que te puedo ayudar?";
     println!("{greeting}");
     let _ = speech.say(greeting);
+    // Without this, the mic starts listening while the greeting is still
+    // playing through the speakers — cold-start's 320ms discard window is
+    // nowhere near long enough to cover it, so the first wake-word check
+    // transcribes Nala's own "Hola" instead of the user. Every later turn
+    // already does this after its own answer; the greeting is the one
+    // case that isn't inside that loop.
+    speech.flush();
 
     // No cancel-signal handler here on purpose: it would swallow every
     // Ctrl+C to cancel the current turn instead, and with no keyboard
