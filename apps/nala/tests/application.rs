@@ -16,9 +16,6 @@ mod fake_clock;
 #[path = "common/fake_cancel.rs"]
 mod fake_cancel;
 
-#[path = "common/fake_speech.rs"]
-mod fake_speech;
-
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
 
@@ -31,14 +28,11 @@ mod ping;
 #[path = "application/tools/dispatcher.rs"]
 mod dispatcher;
 
-#[path = "application/tools/computer_use.rs"]
-mod computer_use;
+#[path = "application/tools/mcp_toolset.rs"]
+mod mcp_toolset;
 
 #[path = "application/assistant.rs"]
 mod assistant;
 
 #[path = "application/context_budget.rs"]
 mod context_budget;
-
-#[path = "application/narration.rs"]
-mod narration;

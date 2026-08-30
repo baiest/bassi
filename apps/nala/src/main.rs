@@ -1,215 +1,32 @@
-use nala::adapters::audio::rodio_player::RodioPlayer;
-#[cfg(windows)]
-use nala::adapters::cancellation::console::CtrlCCancelSignal;
-use nala::adapters::computer::windows::Windows;
-use nala::adapters::environment::system::SystemEnvironment;
-use nala::adapters::events::console::ConsoleEventSink;
-use nala::adapters::events::speaking::SpeakingEventSink;
-use nala::adapters::llm::ollama::OllamaLlm;
-use nala::adapters::mcp::child_process::ChildTransport;
-use nala::adapters::mcp::stdio::StdioMcpClient;
-use nala::adapters::metrics::csv_sink::CsvMetricsSink;
-use nala::adapters::process::windows::Windows as WindowsProcess;
-use nala::adapters::speech::async_speech::AsyncSpeech;
-use nala::adapters::speech::chatterbox::HttpChatterbox;
-use nala::adapters::speech::chatterbox::config::ChatterboxConfig;
-use nala::adapters::speech::chatterbox::supervisor::ChatterboxSupervisor;
-use nala::adapters::speech::piper::PiperSpeech;
-use nala::adapters::speech::piper::config::PiperConfig;
-use nala::adapters::speech::streaming_speech::StreamingSpeech;
-use nala::adapters::speech::windows_sapi::WindowsSapiSpeech;
-use nala::application::assistant::Assistant;
-use nala::application::narration::TemplateNarrator;
-use nala::application::tools::Tool;
-use nala::application::tools::computer_use::{ComputerUseToolset, DEFAULT_ALLOWLIST};
-use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
-use nala::application::tools::execute_command::ExecuteCommandTool;
-use nala::application::tools::ping::PingTool;
-use nala::application::tools::registry::ToolRegistry;
-use nala::cli::prompt::MultilineReader;
-use nala::ports::speech::{Speech, SpeechError};
 use std::path::PathBuf;
 
-type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
-type McpClientType = StdioMcpClient<ChildTransport>;
-
-/// No-op `Speech` backend, used when `NALA_TTS=off` (or on a non-Windows
-/// build). Keeps `AsyncSpeech`/`SpeakingEventSink` wired unconditionally —
-/// narration and the final answer still flow through the same queue, they
-/// just produce no audio — instead of branching the event sink's type on an
-/// env var only known at runtime.
-struct NullSpeech;
-
-impl Speech for NullSpeech {
-    fn say(&self, _text: &str) -> Result<(), SpeechError> {
-        Ok(())
-    }
-}
-
-/// Resolves the TTS backend from `NALA_TTS` (`piper` | `chatterbox` |
-/// `sapi` | `off`, default `piper`). Also returns the `ChatterboxSupervisor`
-/// when one was started, so `main` can keep it alive - dropping it kills
-/// the server process it spawned. Piper has no supervisor: it's a
-/// per-utterance child process, nothing to keep alive between turns.
-///
-/// Piper is the default because it answers about as fast as SAPI while
-/// sounding noticeably more natural - Chatterbox's cloned voice is more
-/// natural still, but synthesis is CPU-bound and much slower, so it stays
-/// opt-in via `NALA_TTS=chatterbox`.
-///
-/// Whichever backend is selected is never allowed to leave Nala mute: any
-/// failure building it (missing binary/model/reference, server
-/// unreachable, no audio device, ...) logs a warning and falls back to
-/// Windows SAPI instead of propagating.
-fn speech_backend() -> (Box<dyn Speech + Send>, Option<ChatterboxSupervisor>) {
-    match std::env::var("NALA_TTS").as_deref() {
-        Ok("off") => (Box::new(NullSpeech), None),
-        Ok("sapi") => (Box::new(WindowsSapiSpeech::new()), None),
-        Ok("chatterbox") => match build_chatterbox() {
-            Ok((speech, supervisor)) => (speech, Some(supervisor)),
-            Err(error) => {
-                eprintln!(
-                    "Warning: Chatterbox TTS unavailable ({error}); falling back to Windows SAPI."
-                );
-                (Box::new(WindowsSapiSpeech::new()), None)
-            }
-        },
-        _ => match build_piper() {
-            Ok(speech) => (speech, None),
-            Err(error) => {
-                eprintln!(
-                    "Warning: Piper TTS unavailable ({error}); falling back to Windows SAPI."
-                );
-                (Box::new(WindowsSapiSpeech::new()), None)
-            }
-        },
-    }
-}
-
-fn build_piper() -> Result<Box<dyn Speech + Send>, SpeechError> {
-    let config = PiperConfig::from_env()?;
-    let synth = PiperSpeech::new(config);
-    let player = RodioPlayer::new()?;
-
-    Ok(Box::new(StreamingSpeech::new(
-        Box::new(synth),
-        Box::new(player),
-    )))
-}
-
-fn build_chatterbox() -> Result<(Box<dyn Speech + Send>, ChatterboxSupervisor), SpeechError> {
-    let config = ChatterboxConfig::from_env()?;
-    let supervisor = ChatterboxSupervisor::ensure_running(&config)?;
-
-    let synth = HttpChatterbox::new(
-        &config.base_url,
-        &config.voice,
-        config.exaggeration,
-        config.cfg_weight,
-        config.temperature,
-        &config.streaming_strategy,
-        config.streaming_chunk_size,
-        config.timeout,
-        config.read_timeout,
-    );
-    let player = RodioPlayer::new()?;
-
-    Ok((
-        Box::new(StreamingSpeech::new(Box::new(synth), Box::new(player))),
-        supervisor,
-    ))
-}
-
-/// How long to wait for a response to a single MCP request (e.g. a
-/// screenshot or a click) before giving up on it. Generous because
-/// computer-use-mcp can be slow to take a screenshot on a loaded machine,
-/// bounded so a wedged MCP server doesn't hang the turn forever.
-const MCP_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+use nala::adapters::events::console::ConsoleEventSink;
+use nala::adapters::metrics::csv_sink::CsvMetricsSink;
+use nala::bootstrap::{self, DEFAULT_MODEL};
+use nala::cli::prompt::MultilineReader;
 
 fn main() {
-    let process = WindowsProcess::new();
-    let environment = SystemEnvironment::new();
-
-    let computer = Windows::new(process, environment);
-
-    let mut registry = ToolRegistry::new();
-    registry.register(ExecuteCommandTool::<ComputerType>::definition());
-    registry.register(PingTool::definition());
-
-    let mut dispatcher: ToolDispatcher<ComputerType, McpClientType> = ToolDispatcher::new();
-
-    dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(computer)));
-    dispatcher.register(Tools::Ping(PingTool::new()));
-
-    // Desktop control (screenshot, click, type, ...) via computer-use-mcp,
-    // spawned over stdio and exposed to the model as a filtered set of
-    // tools. Disabled by default — Nala defends itself with execute_command
-    // alone. Set NALA_MCP=on to opt back into desktop control.
-    if std::env::var("NALA_MCP").as_deref() == Ok("on") {
-        match connect_computer_use() {
-            Ok(toolset) => {
-                for definition in toolset.definitions() {
-                    registry.register(definition.clone());
-                }
-                dispatcher.register(Tools::ComputerUse(toolset));
-            }
-            Err(error) => {
-                eprintln!(
-                    "Warning: could not start computer-use-mcp ({error}); \
-                     Nala will run without desktop control tools."
-                );
-            }
-        }
-    }
-
-    const OLLAMA_MODEL: &str = "gemma4:12b";
-    let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", OLLAMA_MODEL)
-        .expect("Failed to create Ollama client");
-
-    let (backend, _chatterbox_supervisor) = speech_backend();
-    let speech = AsyncSpeech::new(backend);
-    let events = SpeakingEventSink::new(ConsoleEventSink, TemplateNarrator::new(), speech.clone());
+    let events = ConsoleEventSink;
     // Off by default (NALA_METRICS_DIR unset) so development runs and tests
     // don't scatter CSV files on disk; set it to opt into per-task token
-    // accounting for later cost estimation (see apps/nala/src/plan.md).
+    // accounting for later cost estimation.
     let metrics_dir = std::env::var("NALA_METRICS_DIR").ok().map(PathBuf::from);
-    let events = CsvMetricsSink::new(events, metrics_dir, "ollama", OLLAMA_MODEL);
+    let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
 
-    #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut assistant = Assistant::new(llm, dispatcher, registry, events)
-        .with_speech(Box::new(speech.clone()))
-        .with_planning_enabled(std::env::var("NALA_PLANNING").as_deref() == Ok("on"));
+    let assistant = bootstrap::build_assistant(events);
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
-    // handles it) cancels the turn instead of killing the process. Windows
-    // only — `CtrlCCancelSignal` is a `SetConsoleCtrlHandler` wrapper, so
-    // this whole integration doesn't exist on other platforms; falls back
-    // to no cancellation if Windows itself refuses to install the handler.
-    #[cfg(windows)]
-    let cancel_signal = match CtrlCCancelSignal::install() {
-        Ok(signal) => {
-            assistant = assistant.with_cancel_signal(Box::new(signal.clone()));
-            Some(signal)
-        }
-        Err(error) => {
-            eprintln!(
-                "Warning: could not install Ctrl+C handler ({error}); Ctrl+C during a turn will not cancel it."
-            );
-            None
-        }
-    };
-    #[cfg(not(windows))]
-    let cancel_signal: Option<()> = None;
+    // handles it) cancels the turn instead of killing the process.
+    let (mut assistant, cancel_signal) = bootstrap::install_cancel_signal(assistant);
 
     let mut reader = MultilineReader::new();
 
-    let greeting = "Hola, en que te puedo ayudar?";
-    println!("{greeting}");
-    let _ = speech.say(greeting);
+    println!("Nala is ready. What can I help with?");
 
     loop {
         println!(
-            "(puedes escribir/pegar varias lineas y usar flechas/backspace entre ellas; Ctrl+Enter envia)"
+            "(you can write/paste multiple lines and use arrows/backspace between them; Ctrl+Enter submits)"
         );
 
         let input = match reader.read().expect("Failed reading input") {
@@ -229,19 +46,4 @@ fn main() {
             Err(e) => eprintln!("Error: {e}"),
         }
     }
-
-    speech.flush();
-}
-
-fn connect_computer_use() -> Result<ComputerUseToolset<McpClientType>, String> {
-    let transport = ChildTransport::spawn(
-        "npx",
-        &["-y", "@zavora-ai/computer-use-mcp@7.1.0"],
-        MCP_CALL_TIMEOUT,
-    )
-    .map_err(|error| error.to_string())?;
-
-    let client = StdioMcpClient::new(transport);
-
-    ComputerUseToolset::connect(client, DEFAULT_ALLOWLIST).map_err(|error| error.to_string())
 }

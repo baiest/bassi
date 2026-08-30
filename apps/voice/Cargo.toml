@@ -1,0 +1,8 @@
+[package]
+name = "voice"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nala = { path = "../nala" }
+tts = { path = "../../crates/tts" }

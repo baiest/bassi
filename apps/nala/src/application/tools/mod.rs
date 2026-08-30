@@ -1,6 +1,6 @@
-pub mod computer_use;
 pub mod dispatcher;
 pub mod execute_command;
+pub mod mcp_toolset;
 pub mod ping;
 pub mod registry;
 
@@ -16,11 +16,11 @@ pub trait Tool {
 
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
-    /// Whether calling this tool changes something on the user's computer.
-    /// Read-only tools (a screenshot, listing windows) leave this `false`;
-    /// tools that act (running a command, clicking, typing) set it `true`
-    /// so the dispatcher knows to attach evidence of the effect. See
-    /// `ToolOutcome::mutated`.
+    /// Whether calling this tool changes some external state (the
+    /// filesystem, a device, a remote service). Read-only tools leave this
+    /// `false`; tools that act (running a command, flipping a switch) set
+    /// it `true` so the dispatcher knows to attach evidence of the effect.
+    /// See `ToolOutcome::mutated`.
     const MUTATING: bool = false;
 
     /// The JSON schema for `Args`, published to the LLM alongside the tool's
