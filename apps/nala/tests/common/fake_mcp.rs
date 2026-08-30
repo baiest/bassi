@@ -1,7 +1,7 @@
-use nala::ports::mcp::{McpClient, McpError, McpToolInfo, McpToolResult};
+use mcp::{McpClient, McpError, McpToolInfo, McpToolResult};
 
-/// A scripted `McpClient` for testing `ComputerUseToolset` without a real
-/// MCP server. `tools` is what `list_tools` returns; `call_result` (or
+/// A scripted `McpClient` for testing `McpToolset` without a real MCP
+/// server. `tools` is what `list_tools` returns; `call_result` (or
 /// `call_error`) drives `call_tool`, and every call is recorded so tests can
 /// assert what name/arguments were actually sent.
 #[derive(Default)]

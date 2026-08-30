@@ -244,13 +244,11 @@ where
                             "You performed an action that changes state \
                              without confirming the result afterwards. \
                              Verify using the evidence already attached to \
-                             that tool's result — a screenshot for a \
-                             click/type/key/scroll, or the before/after \
+                             that tool's result — e.g. the before/after \
                              system state for a command. That evidence is \
                              already enough in most cases; do NOT take a \
-                             new screenshot unless the last action was a \
-                             screen interaction and the attached evidence \
-                             genuinely does not show the outcome."
+                             new action to re-check unless the attached \
+                             evidence genuinely does not show the outcome."
                                 .to_string(),
                         ));
                         continue;
@@ -267,21 +265,6 @@ where
                         self.token_counter.as_ref(),
                         self.budget.available_tokens(),
                     );
-
-                    if let Some(speech) = &self.speech {
-                        // The whole answer goes out in a single `say` call:
-                        // the Chatterbox backend streams audio back as it's
-                        // generated, so playback starts on the first chunk
-                        // rather than waiting for the full answer — sentence
-                        // splitting here would only add extra round-trips.
-                        if let Err(error) = speech.say(&text) {
-                            self.events.emit(Event::RequestFailed {
-                                task_id: self.task_id(),
-                                duration: request_start.elapsed(),
-                                error: error.to_string(),
-                            });
-                        }
-                    }
 
                     let duration = request_start.elapsed();
                     self.events.emit(Event::RequestCompleted {

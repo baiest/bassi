@@ -8,9 +8,9 @@ const CHARS_PER_TOKEN: usize = 4;
 
 /// Flat token cost assumed per attached image, since actual image tokenization
 /// varies by model and resolution and nala has no access to the model's
-/// vision encoder. Deliberately generous (screenshots are the dominant cost
-/// in a computer-use turn) so eviction kicks in before a real overflow, not
-/// after.
+/// vision encoder. Deliberately generous (an image is usually the dominant
+/// cost in a turn that has any) so eviction kicks in before a real
+/// overflow, not after.
 const TOKENS_PER_IMAGE: usize = 800;
 
 /// A dependency-free token estimator: no tokenizer, just character counts

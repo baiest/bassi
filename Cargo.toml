@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "apps/nala",
+    "apps/voice",
+    "crates/mcp",
+    "crates/tts",
     "crates/process-group",
 ]
 resolver = "3"

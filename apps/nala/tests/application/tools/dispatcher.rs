@@ -1,12 +1,12 @@
 use crate::fake_computer::FakeComputer;
 use crate::fake_mcp::FakeMcpClient;
+use mcp::McpToolResult;
 use nala::application::tools::Tool;
-use nala::application::tools::computer_use::ComputerUseToolset;
 use nala::application::tools::dispatcher::{ToolDispatcher, ToolDispatcherError, Tools};
 use nala::application::tools::execute_command::ExecuteCommandTool;
+use nala::application::tools::mcp_toolset::McpToolset;
 use nala::application::tools::ping::PingTool;
 use nala::ports::llm::ToolCall;
-use nala::ports::mcp::McpToolResult;
 use nala::ports::tool_dispatcher::ToolDispatcher as _;
 
 #[test]
@@ -189,20 +189,23 @@ fn attaches_before_and_after_computer_state_to_execute_command() {
 }
 
 #[test]
-fn does_not_mark_computer_use_read_only_calls_as_mutated() {
+fn never_marks_mcp_tool_calls_as_mutated() {
+    // The MCP protocol has no way to say whether a call changed anything
+    // server-side, so the dispatcher never sets `mutated` for it — even
+    // for a tool whose name suggests it acts, like "send_message".
     let client = FakeMcpClient::new()
-        .with_tool("screenshot", "Take a screenshot")
+        .with_tool("send_message", "Send a chat message")
         .returning(McpToolResult {
-            text: "here is the screen".to_string(),
-            images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
+            text: "sent".to_string(),
+            images: vec![],
         });
-    let toolset = ComputerUseToolset::connect(client, &["screenshot"]).unwrap();
+    let toolset = McpToolset::connect(client, Some(&["send_message"])).unwrap();
 
     let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
-    dispatcher.register(Tools::ComputerUse(toolset));
+    dispatcher.register(Tools::Mcp(toolset));
 
     let tool_call = ToolCall {
-        name: "screenshot".to_string(),
+        name: "send_message".to_string(),
         arguments: "{}".to_string(),
     };
 
@@ -212,48 +215,25 @@ fn does_not_mark_computer_use_read_only_calls_as_mutated() {
 }
 
 #[test]
-fn marks_computer_use_mutating_calls_as_mutated() {
+fn dispatches_to_the_mcp_toolset_and_carries_images_through() {
     let client = FakeMcpClient::new()
-        .with_tool("left_click", "Click the mouse")
+        .with_tool("search", "Search the web")
         .returning(McpToolResult {
-            text: "clicked".to_string(),
-            images: vec![],
-        });
-    let toolset = ComputerUseToolset::connect(client, &["left_click"]).unwrap();
-
-    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
-    dispatcher.register(Tools::ComputerUse(toolset));
-
-    let tool_call = ToolCall {
-        name: "left_click".to_string(),
-        arguments: "{}".to_string(),
-    };
-
-    let outcome = dispatcher.dispatch(tool_call).unwrap();
-
-    assert!(outcome.mutated);
-}
-
-#[test]
-fn dispatches_to_the_computer_use_toolset_and_carries_images_through() {
-    let client = FakeMcpClient::new()
-        .with_tool("screenshot", "Take a screenshot")
-        .returning(McpToolResult {
-            text: "here is the screen".to_string(),
+            text: "here are the results".to_string(),
             images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
         });
-    let toolset = ComputerUseToolset::connect(client, &["screenshot"]).unwrap();
+    let toolset = McpToolset::connect(client, Some(&["search"])).unwrap();
 
     let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
-    dispatcher.register(Tools::ComputerUse(toolset));
+    dispatcher.register(Tools::Mcp(toolset));
 
     let tool_call = ToolCall {
-        name: "screenshot".to_string(),
+        name: "search".to_string(),
         arguments: "{}".to_string(),
     };
 
     let outcome = dispatcher.dispatch(tool_call).unwrap();
 
-    assert_eq!(outcome.text, "here is the screen");
+    assert_eq!(outcome.text, "here are the results");
     assert_eq!(outcome.images, vec!["YmFzZTY0ZGF0YQ==".to_string()]);
 }

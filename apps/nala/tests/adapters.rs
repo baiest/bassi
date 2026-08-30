@@ -7,15 +7,6 @@ mod fake_environment;
 #[path = "common/http_stub.rs"]
 mod http_stub;
 
-#[path = "common/fake_transport.rs"]
-mod fake_transport;
-
-#[path = "common/fake_speech.rs"]
-mod fake_speech;
-
-#[path = "common/fake_tts.rs"]
-mod fake_tts;
-
 #[path = "common/fake_events.rs"]
 mod fake_events;
 
@@ -34,43 +25,5 @@ mod ollama;
 #[path = "adapters/events/console.rs"]
 mod console;
 
-#[path = "adapters/events/speaking.rs"]
-mod speaking;
-
-#[path = "adapters/speech/async_speech.rs"]
-mod async_speech;
-
-#[path = "adapters/speech/chatterbox_config.rs"]
-mod chatterbox_config;
-
-#[path = "adapters/speech/streaming_speech.rs"]
-mod streaming_speech;
-
-#[path = "adapters/speech/chatterbox_http.rs"]
-mod chatterbox_http;
-
-#[path = "adapters/audio/rodio_player.rs"]
-mod rodio_player;
-
-#[path = "adapters/speech/chatterbox_supervisor.rs"]
-mod chatterbox_supervisor;
-
-#[path = "adapters/speech/piper_config.rs"]
-mod piper_config;
-
-#[path = "adapters/speech/piper.rs"]
-mod piper;
-
-#[path = "adapters/mcp/stdio.rs"]
-mod mcp_stdio;
-
 #[path = "adapters/metrics/csv_sink.rs"]
 mod csv_metrics_sink;
-
-// Spawns a real `ping` process to prove a hung MCP server can't block
-// `read_line` forever — Windows-only: the deliberately-silent command it
-// spawns (`ping ... >NUL`) relies on `cmd /C` redirection, which only
-// `ChildTransport` sets up on Windows (see its `spawn` doc comment).
-#[cfg(windows)]
-#[path = "adapters/mcp/child_process.rs"]
-mod mcp_child_process;

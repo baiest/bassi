@@ -1,11 +1,12 @@
+use mcp::McpClient;
+
 use crate::{
     application::tools::{
-        Tool, computer_use::ComputerUseToolset, execute_command::ExecuteCommandTool, ping::PingTool,
+        Tool, execute_command::ExecuteCommandTool, mcp_toolset::McpToolset, ping::PingTool,
     },
     ports::{
         computer::Computer,
         llm::ToolCall,
-        mcp::McpClient,
         tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOutcome},
     },
 };
@@ -23,16 +24,13 @@ pub enum ToolDispatcherError {
 }
 
 /// A `McpClient` that is never actually connected to anything — the default
-/// for `M` so callers that don't use `Tools::ComputerUse` (most tests, and
-/// any setup without computer-use-mcp) don't have to name an MCP client
-/// type at all.
+/// for `M` so callers that don't use `Tools::Mcp` (most tests, and any
+/// setup with `NALA_MCP` off) don't have to name an MCP client type at all.
 #[derive(Debug, Default)]
 pub struct NoMcpClient;
 
 impl McpClient for NoMcpClient {
-    fn list_tools(
-        &mut self,
-    ) -> Result<Vec<crate::ports::mcp::McpToolInfo>, crate::ports::mcp::McpError> {
+    fn list_tools(&mut self) -> Result<Vec<mcp::McpToolInfo>, mcp::McpError> {
         Ok(Vec::new())
     }
 
@@ -40,20 +38,22 @@ impl McpClient for NoMcpClient {
         &mut self,
         _name: &str,
         _arguments: serde_json::Value,
-    ) -> Result<crate::ports::mcp::McpToolResult, crate::ports::mcp::McpError> {
-        Err(crate::ports::mcp::McpError::Transport(
+    ) -> Result<mcp::McpToolResult, mcp::McpError> {
+        Err(mcp::McpError::Transport(
             "NoMcpClient is never connected".to_string(),
         ))
     }
 }
 
 /// One variant per `Tool` implementation the dispatcher knows how to run.
-/// Adding a tool means adding a variant here and a match arm below — both
-/// checked exhaustively at compile time, no runtime type erasure.
+/// Adding a native tool means adding a variant here and a match arm below —
+/// both checked exhaustively at compile time, no runtime type erasure. MCP
+/// tools all share one variant, since their identities are only known once
+/// connected to a server.
 pub enum Tools<C: Computer, M: McpClient = NoMcpClient> {
     ExecuteCommand(ExecuteCommandTool<C>),
     Ping(PingTool),
-    ComputerUse(ComputerUseToolset<M>),
+    Mcp(McpToolset<M>),
 }
 
 pub struct ToolDispatcher<C: Computer, M: McpClient = NoMcpClient> {
@@ -128,9 +128,7 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                         .map(ToolOutcome::from)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
-                Tools::ComputerUse(toolset) if toolset.handles(&tool_call.name) => {
-                    let mutated = ComputerUseToolset::<M>::is_mutating(&tool_call.name);
-
+                Tools::Mcp(toolset) if toolset.handles(&tool_call.name) => {
                     let result = toolset
                         .call(&tool_call.name, &tool_call.arguments)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
@@ -138,7 +136,11 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                     return Ok(ToolOutcome {
                         text: result.text,
                         images: result.images,
-                        mutated,
+                        // MCP's protocol has no way to say whether a call
+                        // changed anything server-side, so it never gates
+                        // on `mutated` — the verification gate only
+                        // applies to native tools that declare `MUTATING`.
+                        mutated: false,
                     });
                 }
                 _ => continue,

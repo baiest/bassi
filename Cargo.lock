@@ -907,6 +907,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mcp"
+version = "0.1.0"
+dependencies = [
+ "process-group",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -941,10 +951,10 @@ name = "nala"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "mcp",
  "process-group",
  "reedline",
  "reqwest",
- "rodio",
  "schemars",
  "serde",
  "serde_json",
@@ -1939,6 +1949,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tts"
+version = "0.1.0"
+dependencies = [
+ "process-group",
+ "reqwest",
+ "rodio",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1985,6 +2007,14 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "voice"
+version = "0.1.0"
+dependencies = [
+ "nala",
+ "tts",
+]
 
 [[package]]
 name = "vte"

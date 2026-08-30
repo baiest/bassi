@@ -30,24 +30,26 @@ if ! cargo llvm-cov --version &> /dev/null; then
 fi
 
 # 3. Generate lcov report (for artifacts / external tooling)
-# main.rs is excluded: it's just wiring (composition root), not testable logic.
-# adapters/process/windows.rs, adapters/mcp/child_process.rs, and
-# adapters/mcp/job_object.rs are excluded: all are thin OS boundaries
-# (Command::new / Win32 Job Objects) that can't be exercised portably in CI.
-# The protocol logic they carry (StdioMcpClient) is covered separately
-# against an in-memory Transport fake. cli/prompt.rs is excluded the same
-# way: a thin composition of reedline's own (independently tested) editor,
-# with no branching logic of our own left to exercise.
-# adapters/speech/chatterbox/supervisor.rs is excluded for the same reason:
+# main.rs and bootstrap.rs (in both apps/nala and apps/voice) are excluded:
+# they're just wiring (composition root), not testable logic.
+# adapters/process/windows.rs and crates/mcp's child_process.rs are
+# excluded: both are thin OS boundaries (Command::new) that can't be
+# exercised portably in CI. The protocol logic they carry (StdioMcpClient)
+# is covered separately against an in-memory Transport fake. cli/prompt.rs
+# is excluded the same way: a thin composition of reedline's own
+# (independently tested) editor, with no branching logic of our own left
+# to exercise.
+# crates/tts's chatterbox/supervisor.rs is excluded for the same reason:
 # past its pure `decide` function (covered by chatterbox_supervisor.rs),
 # it's Command::spawn + a real HTTP health check against a live Chatterbox
 # server, which isn't available in CI.
-# adapters/speech/piper/speech.rs is excluded for the same reason as
+# crates/tts's piper/speech.rs is excluded for the same reason as
 # supervisor.rs: past its pure `build_args`/`normalize_text` helpers
 # (covered by piper.rs), the rest is Command::spawn + reading a real
 # Piper process's stdout/exit status, which needs a real Piper install
-# that isn't available in CI.
-IGNORE_REGEX='main\.rs$|adapters[/\\](process[/\\]windows|mcp[/\\](child_process|job_object)|speech[/\\](chatterbox[/\\]supervisor|piper[/\\]speech))\.rs$|cli[/\\]prompt\.rs$'
+# that isn't available in CI. backend.rs is excluded like main.rs: it's
+# TTS backend selection wiring, not logic with its own branches to test.
+IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 

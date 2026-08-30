@@ -7,9 +7,9 @@ use nala::{
         loop_limits::LoopLimits,
         tools::{
             Tool,
-            computer_use::ComputerUseToolset,
             dispatcher::{ToolDispatcher, Tools},
             execute_command::ExecuteCommandTool,
+            mcp_toolset::McpToolset,
             ping::PingTool,
             registry::ToolRegistry,
         },
@@ -30,14 +30,12 @@ use crate::{
         FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
         FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, MutatesThenAnswersImmediatelyLlm,
         MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, RepliesWithLlm, RepliesWithUsageLlm,
-        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
-        RetriesSameToolWithDifferentArgsLlm,
+        RepeatsSameToolCallLlm, RepliesWithUsageLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm,
+        ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
-    fake_speech::SpySpeech,
 };
-use nala::ports::mcp::McpToolResult;
+use mcp::McpToolResult;
 
 fn registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -257,7 +255,7 @@ fn prunes_old_history_once_it_exceeds_the_token_budget() {
     let system_prompt = assistant
         .system_prompt()
         .expect("system prompt should survive pruning");
-    assert!(system_prompt.starts_with("<role>\nYou are Nala, a computer assistant."));
+    assert!(system_prompt.starts_with("<role>\nYou are Nala, a general-purpose assistant."));
 }
 
 #[test]
@@ -268,13 +266,13 @@ fn emits_events_showing_images_reached_the_tool_result_and_the_next_llm_call() {
             text: "here is the screen".to_string(),
             images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
         });
-    let toolset = ComputerUseToolset::connect(mcp, &["screenshot"]).unwrap();
+    let toolset = McpToolset::connect(mcp, Some(&["screenshot"])).unwrap();
 
     let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
         FakeComputer::new(),
     )));
-    dispatcher.register(Tools::ComputerUse(toolset));
+    dispatcher.register(Tools::Mcp(toolset));
 
     let events = RecordingEventSink::new();
     let mut assistant = Assistant::new(
@@ -699,13 +697,13 @@ fn evicts_old_images_once_the_turn_exceeds_its_token_budget() {
             text: "here is the screen".to_string(),
             images: vec!["YmFzZTY0ZGF0YQ==".to_string()],
         });
-    let toolset = ComputerUseToolset::connect(mcp, &["screenshot"]).unwrap();
+    let toolset = McpToolset::connect(mcp, Some(&["screenshot"])).unwrap();
 
     let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
         FakeComputer::new(),
     )));
-    dispatcher.register(Tools::ComputerUse(toolset));
+    dispatcher.register(Tools::Mcp(toolset));
 
     let events = RecordingEventSink::new();
     let mut assistant = Assistant::new(
@@ -1103,49 +1101,6 @@ fn continues_without_a_plan_when_the_planning_call_fails() {
     let result = assistant.process("pon musica en spotify");
 
     assert_eq!(result.unwrap(), "done");
-}
-
-#[test]
-fn speaks_the_final_answer() {
-    let llm = AlwaysRepliesTextLlm::new();
-    let computer = FakeComputer::new();
-    let speech = SpySpeech::new();
-    let spy = speech.clone();
-
-    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
-    let result = assistant.process("hello");
-
-    assert_eq!(result.unwrap(), "ok");
-    assert_eq!(spy.spoken(), vec!["ok".to_string()]);
-}
-
-#[test]
-fn speaks_a_multi_sentence_answer_in_a_single_call() {
-    // Chunking is left to the streaming backend (server-side sentence
-    // strategy) rather than split here into separate `say` calls, so a
-    // multi-sentence answer still reaches `Speech::say` as one string.
-    let llm = RepliesWithLlm::new("Hola. Como estas?");
-    let computer = FakeComputer::new();
-    let speech = SpySpeech::new();
-    let spy = speech.clone();
-
-    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
-    let result = assistant.process("hello");
-
-    assert_eq!(result.unwrap(), "Hola. Como estas?");
-    assert_eq!(spy.spoken(), vec!["Hola. Como estas?".to_string()]);
-}
-
-#[test]
-fn speech_failure_does_not_break_the_turn() {
-    let llm = AlwaysRepliesTextLlm::new();
-    let computer = FakeComputer::new();
-    let speech = SpySpeech::failing();
-
-    let mut assistant = assistant_with(llm, computer).with_speech(Box::new(speech));
-    let result = assistant.process("hola");
-
-    assert_eq!(result.unwrap(), "ok");
 }
 
 /// A fresh, empty directory per test — no external tempfile crate needed,

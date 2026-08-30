@@ -223,31 +223,6 @@ impl Llm for AlwaysRepliesTextLlm {
     }
 }
 
-/// Always replies immediately with a fixed, caller-provided text. Like
-/// `AlwaysRepliesTextLlm`, but for tests that need to control the exact
-/// final answer (e.g. to check how it gets spoken).
-pub struct RepliesWithLlm {
-    text: String,
-}
-
-impl RepliesWithLlm {
-    pub fn new(text: &str) -> Self {
-        Self {
-            text: text.to_string(),
-        }
-    }
-}
-
-impl Llm for RepliesWithLlm {
-    fn generate(
-        &mut self,
-        _messages: &[Message],
-        _tools: &[&ToolDefinition],
-    ) -> Result<LlmResponse, LlmError> {
-        Ok(LlmResponse::text(self.text.clone()))
-    }
-}
-
 /// Always answers immediately with fixed text and a fixed, caller-provided
 /// `Usage` — used to assert exact token accounting downstream (e.g. in the
 /// CSV metrics sink) without depending on `Usage::default()`.

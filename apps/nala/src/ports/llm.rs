@@ -33,9 +33,9 @@ impl Usage {
     }
 }
 
-/// A single LLM turn. `tool_calls` may hold more than one entry — a model
-/// can request several actions in one response (e.g. "screenshot" won't do
-/// that, but many models batch independent calls) — and the loop executes
+/// A single LLM turn. `tool_calls` may hold more than one entry — some
+/// tools are single-purpose and never batch, but many models still group
+/// several independent calls into one response — and the loop executes
 /// all of them before calling the model again. `text` and `tool_calls` are
 /// not mutually exclusive: a model may emit both a short remark and one or
 /// more tool calls in the same turn.
@@ -90,9 +90,9 @@ pub struct Message {
     /// Set only on `role: "tool"` messages, so the LLM can correlate a
     /// result with the tool call that produced it.
     pub tool_name: Option<String>,
-    /// Base64-encoded images attached to this message (e.g. a screenshot
-    /// returned by a computer-use tool), so a vision-capable model can see
-    /// them. Empty for ordinary text-only messages.
+    /// Base64-encoded images attached to this message (e.g. from a
+    /// vision-capable MCP tool), so a vision-capable model can see them.
+    /// Empty for ordinary text-only messages.
     pub images: Vec<String>,
 }
 

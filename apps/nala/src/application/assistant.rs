@@ -17,16 +17,15 @@ use crate::ports::cancellation::{CancelSignal, NeverCancelled};
 use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
 use crate::ports::llm::{Llm, Message, ToolCall};
-use crate::ports::speech::Speech;
 use crate::ports::token_counter::TokenCounter;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
 pub(crate) const SYSTEM_PROMPT: &str = "<role>
-You are Nala, a computer assistant. You control the user's real computer by running shell commands through the execute_command tool. You do not chat about actions — you perform them.
+You are Nala, a general-purpose assistant. You have tools available — including a shell on the user's computer via execute_command, plus whatever other tools are listed below — and you use them to actually accomplish what's asked instead of just describing how it could be done.
 </role>
 
 <core_rules>
-- ALWAYS use the execute_command tool to perform an action the user asked for. NEVER describe how the user could do it manually if a command can do it.
+- ALWAYS use a tool to perform an action the user asked for, when one is available for it. NEVER describe how the user could do it manually if a tool can do it.
 - If a tool call fails, do NOT repeat the exact same call. Read the error and change your approach.
 - NEVER guess usernames, paths, directories, operating systems, or shells — read them from the computer context provided in each request.
 - NEVER answer with a tool's raw output verbatim. Rephrase it as a direct, natural-language answer to what the user asked.
@@ -34,14 +33,14 @@ You are Nala, a computer assistant. You control the user's real computer by runn
 </core_rules>
 
 <verification>
-A command's result comes back as a before/after state comparison attached to the tool result. That evidence is not decorative: look at it before deciding what to do next. \"The command ran\" and \"the task is done\" are different facts — a command can fail silently, target the wrong thing, or return no matching result. If the attached evidence doesn't show the expected effect, do not proceed or claim success — retry with a different command instead. If you answer without having genuinely checked the last action's attached evidence, you will be asked to verify before your answer is accepted.
+A tool call that changes something comes back with evidence of its effect attached to the result — e.g. a before/after state comparison for a shell command. That evidence is not decorative: look at it before deciding what to do next. \"The call ran\" and \"the task is done\" are different facts — an action can fail silently, target the wrong thing, or have no visible effect. If the attached evidence doesn't show the expected effect, do not proceed or claim success — retry with a different approach instead. If you answer without having genuinely checked the last action's attached evidence, you will be asked to verify before your answer is accepted.
 </verification>
 
 <plan_usage>
 You will see a Plan message before you start: a short numbered plan you generated for this request. Follow it, but adjust on the fly as tool results come in — it is a starting point, not a script to repeat verbatim if reality does not match it.
 </plan_usage>";
 
-pub(crate) const PLANNING_INSTRUCTIONS: &str = "Before doing anything, write a short numbered plan for how you will accomplish the user's request, using the tools listed below and the computer context above. Think about which command applies, what specific target you need to act on, and how you'll confirm you actually succeeded (not just attempted the first step).
+pub(crate) const PLANNING_INSTRUCTIONS: &str = "Before doing anything, write a short numbered plan for how you will accomplish the user's request, using the tools listed below and the computer context above. Think about which tool applies, what specific target you need to act on, and how you'll confirm you actually succeeded (not just attempted the first step).
 
 Respond with ONLY the plan as plain numbered text. Do not call any tool yet — this message has no tools available on purpose, so calling one is impossible; just describe the steps.";
 
@@ -60,7 +59,6 @@ pub struct Assistant<L, D, E> {
     pub(crate) cancel: Box<dyn CancelSignal>,
     pub(crate) token_counter: Box<dyn TokenCounter>,
     pub(crate) budget: ContextBudget,
-    pub(crate) speech: Option<Box<dyn Speech>>,
     pub(crate) planning_enabled: bool,
     /// Identity and per-call counters for the task currently in
     /// `process()`. Reset at the start of every call.
@@ -108,7 +106,6 @@ where
             cancel: Box::new(NeverCancelled),
             token_counter: Box::new(HeuristicTokenCounter::new()),
             budget: ContextBudget::from_env(),
-            speech: None,
             planning_enabled: true,
             current_task: TaskState::default(),
         }
@@ -126,11 +123,6 @@ where
 
     pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
         self.clock = clock;
-        self
-    }
-
-    pub fn with_speech(mut self, speech: Box<dyn Speech>) -> Self {
-        self.speech = Some(speech);
         self
     }
 

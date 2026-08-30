@@ -14,10 +14,9 @@ pub struct ContextBudget {
     /// `max_tokens` to get the budget available for the prompt.
     pub output_reserve: usize,
     /// How many of the most recent images are kept; older ones are
-    /// stripped first since they're almost always the dominant cost in a
-    /// computer-use turn (each screenshot vastly outweighs any text
-    /// message) and a stale screenshot is rarely still useful once newer
-    /// ones exist.
+    /// stripped first since an image is almost always the dominant cost
+    /// in a turn that has any (it vastly outweighs any text message) and
+    /// a stale one is rarely still useful once newer ones exist.
     pub keep_recent_images: usize,
     /// A tool result's text longer than `truncate_head_chars +
     /// truncate_tail_chars` is cut down to a head/tail excerpt.
