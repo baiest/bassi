@@ -91,6 +91,11 @@ pub struct Listener<A, V, W, T> {
     /// settle window.
     first_call: bool,
     on_status: Box<dyn FnMut(ListenerStatus)>,
+    /// An external "start capturing now" signal, independent of the wake
+    /// word — a debugging aid for testing without repeating the wake
+    /// phrase every time. Any pending message forces the same
+    /// `Action::StartCapture` a real wake-word detection would.
+    manual_trigger: Option<std::sync::mpsc::Receiver<()>>,
 }
 
 impl<A, V, W, T> Listener<A, V, W, T>
@@ -121,6 +126,7 @@ where
             recent: Ring::with_capacity(recent_capacity * CHUNK_SAMPLES),
             first_call: true,
             on_status: Box::new(|_| {}),
+            manual_trigger: None,
         }
     }
 
@@ -129,6 +135,15 @@ where
     /// is doing instead of it being silent until a transcript comes back.
     pub fn with_status<F: FnMut(ListenerStatus) + 'static>(mut self, on_status: F) -> Self {
         self.on_status = Box::new(on_status);
+        self
+    }
+
+    /// Registers a channel that can force a capture to start regardless of
+    /// the wake word or the VAD — a debugging aid for testing the pipeline
+    /// without saying "oye Nala" every time. Any message received counts
+    /// once, whether or not more than one arrived since the last chunk.
+    pub fn with_manual_trigger(mut self, trigger: std::sync::mpsc::Receiver<()>) -> Self {
+        self.manual_trigger = Some(trigger);
         self
     }
 
@@ -167,11 +182,19 @@ where
             if speech && !was_active {
                 self.prime_wake_detector();
             }
-            let wake = if speech {
+            let detected = if speech {
                 self.wake.detect(&chunk)
             } else {
                 false
             };
+            let forced = self
+                .manual_trigger
+                .as_ref()
+                .is_some_and(|trigger| trigger.try_iter().count() > 0);
+            if forced {
+                eprintln!("  [stt] disparo manual (Enter)");
+            }
+            let wake = detected || forced;
 
             match session.observe(speech, wake) {
                 Action::Idle => {}

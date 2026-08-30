@@ -6,7 +6,22 @@ fn main() {
     let (mut assistant, speech, _chatterbox_supervisor) = bootstrap::build();
 
     println!("Cargando el pipeline de escucha (VAD + wake word)...");
-    let listener = bootstrap::build_listener();
+    println!("⌨️  Enter en cualquier momento fuerza una captura (sin decir 'oye Nala')");
+    let (manual_trigger_tx, manual_trigger_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if std::io::stdin().read_line(&mut line).is_err() {
+                break;
+            }
+            if manual_trigger_tx.send(()).is_err() {
+                break; // The listener is gone; nothing left to trigger.
+            }
+        }
+    });
+
+    let listener = bootstrap::build_listener().with_manual_trigger(manual_trigger_rx);
     let mut listener = listener.with_status(|status| {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
