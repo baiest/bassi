@@ -55,6 +55,14 @@ impl Transcriber {
         params.set_print_progress(false);
         params.set_print_special(false);
         params.set_print_realtime(false);
+        // Whisper's initial_prompt biases decoding toward tokens likely to
+        // appear, which matters a lot on the short (well under a second)
+        // clips the wake-word check runs on — too little audio for the
+        // model to lean on its own context, and "Nala" isn't a word it
+        // otherwise expects, so it gets misheard as "mala" or dropped
+        // entirely. This is a soft nudge, not a forced prefix, so it
+        // doesn't distort transcription of unrelated speech.
+        params.set_initial_prompt("oye Nala, ey Nala, ve Nala.");
 
         state
             .full(params, samples)
