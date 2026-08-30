@@ -49,7 +49,13 @@ fi
 # Piper process's stdout/exit status, which needs a real Piper install
 # that isn't available in CI. backend.rs is excluded like main.rs: it's
 # TTS backend selection wiring, not logic with its own branches to test.
-IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|cli[/\\]prompt\.rs$'
+# crates/stt's capture.rs is excluded past its pure `resample_linear`
+# helper (covered by its own unit tests): the rest needs a real
+# microphone/input device, which CI doesn't have. transcribe.rs is
+# excluded for the same reason as chatterbox/supervisor.rs and
+# piper/speech.rs: it needs a real Whisper model file, which is
+# gigabytes and gitignored, not something CI downloads.
+IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|crates[/\\]stt[/\\]src[/\\](capture|transcribe)\.rs$|cli[/\\]prompt\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 

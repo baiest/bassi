@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 nala = { path = "../nala" }
+stt = { path = "../../crates/stt" }
 tts = { path = "../../crates/tts" }
