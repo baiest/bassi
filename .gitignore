@@ -13,3 +13,7 @@ coverage.out
 /tools/piper/
 /data/voices/piper/*.onnx
 /data/voices/piper/*.onnx.json
+
+# Whisper GGML models: downloaded by scripts/stt-setup.ps1, not checked in
+# (100 MB-3 GB depending on size, don't belong in the repo).
+/data/whisper/

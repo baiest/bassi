@@ -39,3 +39,13 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
 
     (assistant, speech, chatterbox_supervisor)
 }
+
+/// Loads the Whisper model once at startup. Loading is slow (reads the
+/// whole model file), so `main` builds one `Transcriber` and reuses it
+/// across turns rather than reloading it per turn.
+pub fn build_transcriber() -> stt::Transcriber {
+    let model_path = std::env::var("NALA_WHISPER_MODEL")
+        .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+
+    stt::Transcriber::load(&model_path).expect("Failed to load Whisper model")
+}

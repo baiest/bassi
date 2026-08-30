@@ -4,6 +4,7 @@ members = [
     "apps/voice",
     "crates/mcp",
     "crates/tts",
+    "crates/stt",
     "crates/process-group",
 ]
 resolver = "3"
