@@ -141,11 +141,9 @@ fn main() {
 
     // Desktop control (screenshot, click, type, ...) via computer-use-mcp,
     // spawned over stdio and exposed to the model as a filtered set of
-    // tools. This block is the only place computer-use-mcp is referenced;
-    // deleting it (or swapping the spawned command) is all it takes to
-    // remove or replace the integration. Set NALA_MCP=off to run without it
-    // (e.g. when Node/npx isn't available).
-    if std::env::var("NALA_MCP").as_deref() != Ok("off") {
+    // tools. Disabled by default — Nala defends itself with execute_command
+    // alone. Set NALA_MCP=on to opt back into desktop control.
+    if std::env::var("NALA_MCP").as_deref() == Ok("on") {
         match connect_computer_use() {
             Ok(toolset) => {
                 for definition in toolset.definitions() {
@@ -162,7 +160,7 @@ fn main() {
         }
     }
 
-    let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "gemma4:e4b")
+    let llm: OllamaLlm = OllamaLlm::new("http://localhost:11434", "gemma4:12b")
         .expect("Failed to create Ollama client");
 
     let (backend, _chatterbox_supervisor) = speech_backend();
@@ -170,8 +168,9 @@ fn main() {
     let events = SpeakingEventSink::new(ConsoleEventSink, TemplateNarrator::new(), speech.clone());
 
     #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut assistant =
-        Assistant::new(llm, dispatcher, registry, events).with_speech(Box::new(speech.clone()));
+    let mut assistant = Assistant::new(llm, dispatcher, registry, events)
+        .with_speech(Box::new(speech.clone()))
+        .with_planning_enabled(std::env::var("NALA_PLANNING").as_deref() == Ok("on"));
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
     // handles it) cancels the turn instead of killing the process. Windows

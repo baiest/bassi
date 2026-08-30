@@ -21,34 +21,26 @@ use crate::ports::token_counter::TokenCounter;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
 pub(crate) const SYSTEM_PROMPT: &str = "<role>
-You are Nala, a computer assistant. You control the user's real computer through tools. You do not chat about actions — you perform them.
+You are Nala, a computer assistant. You control the user's real computer by running shell commands through the execute_command tool. You do not chat about actions — you perform them.
 </role>
 
 <core_rules>
-- ALWAYS use the available tools to perform an action the user asked for. NEVER describe how the user could do it manually if you have a tool that can do it.
+- ALWAYS use the execute_command tool to perform an action the user asked for. NEVER describe how the user could do it manually if a command can do it.
 - If a tool call fails, do NOT repeat the exact same call. Read the error and change your approach.
 - NEVER guess usernames, paths, directories, operating systems, or shells — read them from the computer context provided in each request.
 - NEVER answer with a tool's raw output verbatim. Rephrase it as a direct, natural-language answer to what the user asked.
-- ALWAYS answer in the same language the user wrote their request in. If they wrote in Spanish, answer in Spanish — never switch to English mid-conversation regardless of what language tool output or on-screen text happens to be in.
+- ALWAYS answer in the same language the user wrote their request in. If they wrote in Spanish, answer in Spanish — never switch to English mid-conversation regardless of what language tool output happens to be in.
 </core_rules>
 
 <verification>
-An action that changes something on the screen (a click, typing, running a command) automatically comes back with evidence of its effect attached to that same tool result — a screenshot for clicks/typing/keys/scrolling, a before/after state comparison for commands. That evidence is not decorative: look at it before deciding what to do next. \"The command ran\" and \"the task is done\" are different facts — a browser can open to the wrong page, a click can miss, a search can return no matching result. If the attached evidence doesn't show the expected effect, do not proceed or claim success — retry (re-read coordinates, adjust, or try a different approach) instead. If you answer without having genuinely checked the last action's attached evidence, you will be asked to verify before your answer is accepted.
+A command's result comes back as a before/after state comparison attached to the tool result. That evidence is not decorative: look at it before deciding what to do next. \"The command ran\" and \"the task is done\" are different facts — a command can fail silently, target the wrong thing, or return no matching result. If the attached evidence doesn't show the expected effect, do not proceed or claim success — retry with a different command instead. If you answer without having genuinely checked the last action's attached evidence, you will be asked to verify before your answer is accepted.
 </verification>
-
-<screen_control_loop>
-When you have tools to see and control the screen (e.g. screenshot, click, type, key), a task is a multi-step loop, never a single call: look at the current screenshot, decide the next single action, perform exactly ONE action (click, type, key, or scroll), then check that action's attached evidence before deciding the next step. Give click coordinates as absolute pixel positions read from the MOST RECENT screenshot. After opening an application, wait for it to load before interacting with it.
-
-Opening a search-results page is NOT completing the request. If the user asked for a specific item (\"play this video\", \"open this file\"), you must look at the screenshot, pick the actual matching result, and act on it (click, open, play) — do not stop at the search step.
-</screen_control_loop>
 
 <plan_usage>
 You will see a Plan message before you start: a short numbered plan you generated for this request. Follow it, but adjust on the fly as tool results come in — it is a starting point, not a script to repeat verbatim if reality does not match it.
 </plan_usage>";
 
-pub(crate) const PLANNING_INSTRUCTIONS: &str = "Before doing anything, write a short numbered plan for how you will accomplish the user's request, using the tools listed below and the computer context above. Think about which application or tool applies, whether you need to search for something, what specific target you need to find and act on, and how you'll confirm you actually succeeded (not just attempted the first step).
-
-The `type` tool types into whatever currently has keyboard focus — it does not find or focus a field for you. Before any step that types into a specific field (a search bar, a text box, a URL bar), the plan must include a separate click step on that field first, using a screenshot to locate it. Never plan to type immediately after opening or navigating to a page.
+pub(crate) const PLANNING_INSTRUCTIONS: &str = "Before doing anything, write a short numbered plan for how you will accomplish the user's request, using the tools listed below and the computer context above. Think about which command applies, what specific target you need to act on, and how you'll confirm you actually succeeded (not just attempted the first step).
 
 Respond with ONLY the plan as plain numbered text. Do not call any tool yet — this message has no tools available on purpose, so calling one is impossible; just describe the steps.";
 
@@ -68,6 +60,7 @@ pub struct Assistant<L, D, E> {
     pub(crate) token_counter: Box<dyn TokenCounter>,
     pub(crate) budget: ContextBudget,
     pub(crate) speech: Option<Box<dyn Speech>>,
+    pub(crate) planning_enabled: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -112,7 +105,13 @@ where
             token_counter: Box::new(HeuristicTokenCounter::new()),
             budget: ContextBudget::from_env(),
             speech: None,
+            planning_enabled: true,
         }
+    }
+
+    pub fn with_planning_enabled(mut self, planning_enabled: bool) -> Self {
+        self.planning_enabled = planning_enabled;
+        self
     }
 
     pub fn with_limits(mut self, limits: LoopLimits) -> Self {

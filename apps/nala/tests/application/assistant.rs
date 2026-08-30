@@ -234,7 +234,7 @@ fn prunes_old_history_once_it_exceeds_the_token_budget() {
     // hold the system prompt plus a handful of them.
     let mut assistant = assistant_with(AlwaysRepliesTextLlm::new(), FakeComputer::new())
         .with_budget(ContextBudget {
-            max_tokens: 600,
+            max_tokens: 500,
             output_reserve: 0,
             ..ContextBudget::default()
         });

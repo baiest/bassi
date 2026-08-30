@@ -104,6 +104,19 @@ impl Process for Windows {
         let stdout = stdout_reader.join().unwrap_or_default();
         let stderr = stderr_reader.join().unwrap_or_default();
 
+        // The job is only meant to kill stragglers on a timeout (handled
+        // above, before this point). On a normal return, dropping `job`
+        // would close its handle and — because of
+        // `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — kill everything still
+        // assigned to it, including a GUI app the command just launched
+        // (e.g. `start app.exe`) that is still running when `cmd.exe`
+        // itself has already exited. Forget it instead so the launched
+        // process(es) survive; the handle leaks for the life of this
+        // process, which is an acceptable trade for not killing what the
+        // user asked to open.
+        #[cfg(windows)]
+        std::mem::forget(job);
+
         if !status.success() {
             return Err(ProcessError::ProcessFailed(format!(
                 "Command failed: {command} {:?}\n{}",
