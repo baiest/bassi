@@ -99,6 +99,10 @@ impl<T: Transcribe> WakeDetector for WhisperWake<T> {
         }
         self.since_check = 0;
 
+        eprintln!(
+            "  [stt] wake: transcribiendo {} samples...",
+            self.buffer.len()
+        );
         let started = std::time::Instant::now();
         let result = self.transcriber.transcribe(&self.buffer);
         let elapsed = started.elapsed();

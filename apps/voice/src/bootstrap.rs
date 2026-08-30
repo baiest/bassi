@@ -60,19 +60,18 @@ type VoiceListener = stt::Listener<
 /// time a check returned, the next one was already working with stale
 /// audio. It looked like the pipeline had stopped listening.
 ///
-/// `NALA_WHISPER_WAKE_MODEL` defaults to `tiny` for that reason.
-/// `NALA_WHISPER_MODEL` (the final-transcription model) still defaults to
-/// `base`, not `tiny`: measured on a real recording, `tiny` mistranscribed
-/// "Nala" as "mala" on its own — too unreliable for telling the assistant
-/// from the user's cat, who is also named Nala. See BAS-25 for the
-/// measurement. `set_initial_prompt` in `Transcriber::transcribe` biases
-/// *both* models toward "Nala", which is what makes `tiny` acceptable for
-/// the wake check despite that earlier finding.
+/// Both `NALA_WHISPER_MODEL` and `NALA_WHISPER_WAKE_MODEL` default to
+/// `small` for now: `tiny` proved too inaccurate to reliably catch "oye
+/// Nala" at all (not just confusing it with "mala" — it sometimes doesn't
+/// hear the phrase in the transcript whatsoever), and `base` was too slow
+/// to keep the wake check's 800ms interval on this machine. Revisit once
+/// there's a measurement showing `tiny` (or `base`) is good enough for one
+/// side of the split. See BAS-25.
 pub fn build_listener() -> VoiceListener {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
-        .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+        .unwrap_or_else(|_| "data/whisper/ggml-small.bin".to_string());
     let wake_model_path = std::env::var("NALA_WHISPER_WAKE_MODEL")
-        .unwrap_or_else(|_| "data/whisper/ggml-tiny.bin".to_string());
+        .unwrap_or_else(|_| "data/whisper/ggml-small.bin".to_string());
     // whisper.cpp's own startup log (which would otherwise show the model
     // size/type) is silenced in Transcriber::load, so this is the only
     // visible confirmation of which models actually got loaded — including

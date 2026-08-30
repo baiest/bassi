@@ -201,6 +201,7 @@ where
                         (self.on_status)(ListenerStatus::MaxDurationReached);
                     }
                     (self.on_status)(ListenerStatus::Transcribing);
+                    eprintln!("  [stt] final: transcribiendo {} samples...", capture.len());
                     let started = std::time::Instant::now();
                     let raw = self.transcriber.transcribe(&capture)?;
                     eprintln!(
