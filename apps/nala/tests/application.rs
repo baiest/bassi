@@ -13,6 +13,12 @@ mod fake_events;
 #[path = "common/fake_clock.rs"]
 mod fake_clock;
 
+#[path = "common/fake_wall_clock.rs"]
+mod fake_wall_clock;
+
+#[path = "common/fake_http_fetcher.rs"]
+mod fake_http_fetcher;
+
 #[path = "common/fake_cancel.rs"]
 mod fake_cancel;
 
@@ -24,6 +30,18 @@ mod registry;
 
 #[path = "application/tools/ping.rs"]
 mod ping;
+
+#[path = "application/tools/current_time.rs"]
+mod current_time;
+
+#[path = "application/tools/get_weather.rs"]
+mod get_weather;
+
+#[path = "application/tools/web_search.rs"]
+mod web_search;
+
+#[path = "application/tools/fetch_url.rs"]
+mod fetch_url;
 
 #[path = "application/tools/dispatcher.rs"]
 mod dispatcher;

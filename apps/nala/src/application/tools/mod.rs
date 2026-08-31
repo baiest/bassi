@@ -1,8 +1,12 @@
+pub mod current_time;
 pub mod dispatcher;
 pub mod execute_command;
+pub mod fetch_url;
+pub mod get_weather;
 pub mod mcp_toolset;
 pub mod ping;
 pub mod registry;
+pub mod web_search;
 
 // Re-exported so existing `application::tools::ToolDefinition` call sites
 // keep working — the type itself lives in ports/tool.rs since it crosses

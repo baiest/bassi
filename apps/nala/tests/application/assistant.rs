@@ -7,7 +7,7 @@ use nala::{
         loop_limits::LoopLimits,
         tools::{
             Tool,
-            dispatcher::{ToolDispatcher, Tools},
+            dispatcher::{NoHttpFetcher, NoWallClock, ToolDispatcher, Tools},
             execute_command::ExecuteCommandTool,
             mcp_toolset::McpToolset,
             ping::PingTool,
@@ -268,11 +268,12 @@ fn emits_events_showing_images_reached_the_tool_result_and_the_next_llm_call() {
         });
     let toolset = McpToolset::connect(mcp, Some(&["screenshot"])).unwrap();
 
-    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, FakeMcpClient>::new();
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
         FakeComputer::new(),
     )));
-    dispatcher.register(Tools::Mcp(toolset));
+    dispatcher.register(Tools::Mcp(vec![toolset]));
 
     let events = RecordingEventSink::new();
     let mut assistant = Assistant::new(
@@ -699,11 +700,12 @@ fn evicts_old_images_once_the_turn_exceeds_its_token_budget() {
         });
     let toolset = McpToolset::connect(mcp, Some(&["screenshot"])).unwrap();
 
-    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, FakeMcpClient>::new();
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
         FakeComputer::new(),
     )));
-    dispatcher.register(Tools::Mcp(toolset));
+    dispatcher.register(Tools::Mcp(vec![toolset]));
 
     let events = RecordingEventSink::new();
     let mut assistant = Assistant::new(

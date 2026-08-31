@@ -2,7 +2,9 @@ use crate::fake_computer::FakeComputer;
 use crate::fake_mcp::FakeMcpClient;
 use mcp::McpToolResult;
 use nala::application::tools::Tool;
-use nala::application::tools::dispatcher::{ToolDispatcher, ToolDispatcherError, Tools};
+use nala::application::tools::dispatcher::{
+    NoHttpFetcher, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
+};
 use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::mcp_toolset::McpToolset;
 use nala::application::tools::ping::PingTool;
@@ -201,8 +203,9 @@ fn never_marks_mcp_tool_calls_as_mutated() {
         });
     let toolset = McpToolset::connect(client, Some(&["send_message"])).unwrap();
 
-    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
-    dispatcher.register(Tools::Mcp(toolset));
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, FakeMcpClient>::new();
+    dispatcher.register(Tools::Mcp(vec![toolset]));
 
     let tool_call = ToolCall {
         name: "send_message".to_string(),
@@ -224,8 +227,9 @@ fn dispatches_to_the_mcp_toolset_and_carries_images_through() {
         });
     let toolset = McpToolset::connect(client, Some(&["search"])).unwrap();
 
-    let mut dispatcher = ToolDispatcher::<FakeComputer, FakeMcpClient>::new();
-    dispatcher.register(Tools::Mcp(toolset));
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, FakeMcpClient>::new();
+    dispatcher.register(Tools::Mcp(vec![toolset]));
 
     let tool_call = ToolCall {
         name: "search".to_string(),

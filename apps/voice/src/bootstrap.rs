@@ -8,8 +8,7 @@ use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
 use nala::application::assistant::Assistant;
-use nala::application::tools::dispatcher::ToolDispatcher;
-use nala::bootstrap::{self, ComputerType, DEFAULT_MODEL, McpClientType};
+use nala::bootstrap::{self, DEFAULT_MODEL, DispatcherType};
 
 use tts::{AsyncSpeech, ChatterboxSupervisor, speech_backend};
 
@@ -17,7 +16,7 @@ use crate::narration::TemplateNarrator;
 use crate::speaking_sink::SpeakingEventSink;
 
 type Events = CsvMetricsSink<SpeakingEventSink<ConsoleEventSink, TemplateNarrator>>;
-type VoiceAssistant = Assistant<OllamaLlm, ToolDispatcher<ComputerType, McpClientType>, Events>;
+type VoiceAssistant = Assistant<OllamaLlm, DispatcherType, Events>;
 
 /// Builds the speech backend, an `AsyncSpeech` handle to it, and the fully
 /// wired `Assistant` narrating through the same speech queue. Returns the
