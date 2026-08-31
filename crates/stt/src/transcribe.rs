@@ -8,6 +8,16 @@ pub enum TranscribeError {
     Transcription(String),
 }
 
+/// Turns audio samples into text.
+///
+/// A trait so anything built on top of it — the wake detector, the
+/// listener — can be tested with a scripted fake instead of a real,
+/// multi-hundred-megabyte model.
+pub trait Transcribe {
+    /// `samples` must be mono at [`crate::WHISPER_SAMPLE_RATE`].
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError>;
+}
+
 /// Wraps a loaded whisper.cpp model. Loading is slow (reads the whole
 /// model file), so build one `Transcriber` once and reuse it across turns
 /// rather than loading per call.
@@ -17,6 +27,14 @@ pub struct Transcriber {
 
 impl Transcriber {
     pub fn load(model_path: &str) -> Result<Self, TranscribeError> {
+        // whisper.cpp otherwise prints its own verbose decoder/allocation
+        // logs straight to stdout on every call, drowning out anything
+        // this crate's callers print. Routes them through the `log` crate
+        // instead, where they're silently dropped without a registered
+        // logger — exactly what a CLI with no logging setup wants. Safe
+        // to call once per process even with multiple `Transcriber`s.
+        whisper_rs::install_whisper_log_trampoline();
+
         let context =
             WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
                 .map_err(|e| TranscribeError::ModelLoad(model_path.to_string(), e.to_string()))?;
@@ -37,6 +55,14 @@ impl Transcriber {
         params.set_print_progress(false);
         params.set_print_special(false);
         params.set_print_realtime(false);
+        // Whisper's initial_prompt biases decoding toward tokens likely to
+        // appear, which matters a lot on the short (well under a second)
+        // clips the wake-word check runs on — too little audio for the
+        // model to lean on its own context, and "Nala" isn't a word it
+        // otherwise expects, so it gets misheard as "mala" or dropped
+        // entirely. This is a soft nudge, not a forced prefix, so it
+        // doesn't distort transcription of unrelated speech.
+        params.set_initial_prompt("oye Nala, ey Nala, ve Nala.");
 
         state
             .full(params, samples)
@@ -54,5 +80,20 @@ impl Transcriber {
         }
 
         Ok(text.trim().to_string())
+    }
+}
+
+impl Transcribe for Transcriber {
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError> {
+        Transcriber::transcribe(self, samples)
+    }
+}
+
+/// Lets one loaded model be shared between the wake detector and the
+/// final-command transcription without loading it twice — `Transcribe`
+/// only needs `&self`, so an `Arc` is enough, no lock required.
+impl<T: Transcribe> Transcribe for std::sync::Arc<T> {
+    fn transcribe(&self, samples: &[f32]) -> Result<String, TranscribeError> {
+        T::transcribe(self, samples)
     }
 }

@@ -1,3 +1,5 @@
+use nala::application::assistant::AssistantError;
+use nala::ports::llm::LlmError;
 use tts::Speech;
 use voice::bootstrap;
 
@@ -10,6 +12,7 @@ fn main() {
     let greeting = "Hola, en que te puedo ayudar?";
     println!("{greeting}");
     let _ = speech.say(greeting);
+    speech.flush();
 
     loop {
         println!("Apretá Enter para hablar (o escribí 'salir' para terminar)...");
@@ -54,10 +57,30 @@ fn main() {
                 // The whole answer goes out in a single `say` call: a
                 // streaming backend starts playback on the first chunk
                 // rather than waiting for the full answer, so splitting
-                // this further would only add extra round-trips.
+                // this further would only add extra round-trips. flush()
+                // blocks until it's fully spoken, keeping the next
+                // recording from picking up Nala's own voice.
                 let _ = speech.say(&response);
+                speech.flush();
             }
-            Err(e) => eprintln!("Error: {e}"),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                let spoken = match &e {
+                    AssistantError::Llm(LlmError::ModelNotFound(model)) => format!(
+                        "No encontré el modelo {model} en Ollama. Corré 'ollama pull {model}' y probá de nuevo."
+                    ),
+                    AssistantError::Llm(LlmError::RequestFailed(_)) => {
+                        "No pude conectarme con Ollama. Revisá que esté corriendo.".to_string()
+                    }
+                    AssistantError::Llm(LlmError::InvalidResponse(_)) => {
+                        "Ollama me respondió algo que no pude entender.".to_string()
+                    }
+                    AssistantError::Cancelled => "Cancelado.".to_string(),
+                    _ => "Tuve un error interno, revisá la consola.".to_string(),
+                };
+                let _ = speech.say(&spoken);
+                speech.flush();
+            }
         }
     }
 

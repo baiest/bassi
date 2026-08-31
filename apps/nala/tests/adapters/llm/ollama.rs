@@ -92,6 +92,16 @@ fn fails_on_non_success_status() {
 }
 
 #[test]
+fn fails_with_model_not_found_on_404() {
+    let stub = HttpStub::start(404, "model not found");
+    let mut llm = OllamaLlm::new(&stub.base_url, "missing-model").unwrap();
+
+    let result = llm.generate(&[], &[]);
+
+    assert!(matches!(result, Err(LlmError::ModelNotFound(model)) if model == "missing-model"));
+}
+
+#[test]
 fn fails_on_malformed_json() {
     let stub = HttpStub::start(200, "not json");
     let mut llm = OllamaLlm::new(&stub.base_url, "test-model").unwrap();

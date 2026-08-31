@@ -31,7 +31,13 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
     let events = ConsoleEventSink;
     let events = SpeakingEventSink::new(events, TemplateNarrator::new(), speech.clone());
 
-    let metrics_dir = std::env::var("NALA_METRICS_DIR").ok().map(PathBuf::from);
+    // Defaults to data/metrics so every run gets token accounting without
+    // extra setup; override with NALA_METRICS_DIR to point elsewhere.
+    let metrics_dir = Some(
+        std::env::var("NALA_METRICS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("data/metrics")),
+    );
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
 
@@ -45,7 +51,7 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
 /// across turns rather than reloading it per turn.
 pub fn build_transcriber() -> stt::Transcriber {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
-        .unwrap_or_else(|_| "data/whisper/ggml-base.bin".to_string());
+        .unwrap_or_else(|_| "data/whisper/ggml-small.bin".to_string());
 
     stt::Transcriber::load(&model_path).expect("Failed to load Whisper model")
 }

@@ -63,7 +63,7 @@ pub fn record_until_enter() -> Result<RecordedAudio, CaptureError> {
         .play()
         .map_err(|e| CaptureError::StreamStart(e.to_string()))?;
 
-    println!("Recording... press Enter to finish.");
+    println!("Grabando... Enter para terminar.");
     let mut discard = String::new();
     std::io::stdin().read_line(&mut discard).ok();
 
