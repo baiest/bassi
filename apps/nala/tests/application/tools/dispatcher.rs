@@ -6,6 +6,7 @@ use nala::application::tools::dispatcher::{
     NoHttpFetcher, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
 };
 use nala::application::tools::execute_command::ExecuteCommandTool;
+use nala::application::tools::list_apps::ListAppsTool;
 use nala::application::tools::mcp_toolset::McpToolset;
 use nala::application::tools::open_app::OpenAppTool;
 use nala::application::tools::open_url::OpenUrlTool;
@@ -239,6 +240,24 @@ fn dispatches_volume_and_marks_it_mutated() {
     let outcome = dispatcher.dispatch(tool_call).unwrap();
 
     assert!(outcome.mutated);
+}
+
+#[test]
+fn dispatches_list_apps_and_does_not_mark_it_mutated() {
+    let mut computer = FakeComputer::new();
+    computer.output = r#"[{"Name":"Notepad","AppID":"notepad.exe"}]"#.to_string();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::ListApps(ListAppsTool::new(computer)));
+
+    let tool_call = ToolCall {
+        name: "list_apps".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.text.contains("Notepad"));
+    assert!(!outcome.mutated);
 }
 
 #[test]
