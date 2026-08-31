@@ -3,7 +3,6 @@
 //! it. `main.rs` only runs the result.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::llm::ollama::OllamaLlm;
@@ -32,7 +31,13 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
     let events = ConsoleEventSink;
     let events = SpeakingEventSink::new(events, TemplateNarrator::new(), speech.clone());
 
-    let metrics_dir = std::env::var("NALA_METRICS_DIR").ok().map(PathBuf::from);
+    // Defaults to data/metrics so every run gets token accounting without
+    // extra setup; override with NALA_METRICS_DIR to point elsewhere.
+    let metrics_dir = Some(
+        std::env::var("NALA_METRICS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("data/metrics")),
+    );
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
 
@@ -41,70 +46,12 @@ pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
     (assistant, speech, chatterbox_supervisor)
 }
 
-type VoiceListener = stt::Listener<
-    stt::MicStream,
-    stt::SileroVad,
-    stt::WhisperWake<Arc<stt::Transcriber>>,
-    Arc<stt::Transcriber>,
->;
-
-/// Opens the microphone and builds the full always-listening pipeline.
-///
-/// Wake-word checking and final-command transcription use *different*
-/// loaded models on purpose: the wake check runs every 800ms on a growing
-/// buffer, so it needs to be fast, while the final transcription only runs
-/// once per utterance and needs to be accurate. Sharing one model (as an
-/// earlier version of this did) meant `base` was slow enough on CPU that a
-/// wake check could take longer than the 800ms interval it's supposed to
-/// run at — the mic kept recording into the ring the whole time, so by the
-/// time a check returned, the next one was already working with stale
-/// audio. It looked like the pipeline had stopped listening.
-///
-/// Both `NALA_WHISPER_MODEL` and `NALA_WHISPER_WAKE_MODEL` default to
-/// `small` for now: `tiny` proved too inaccurate to reliably catch "oye
-/// Nala" at all (not just confusing it with "mala" — it sometimes doesn't
-/// hear the phrase in the transcript whatsoever), and `base` was too slow
-/// to keep the wake check's 800ms interval on this machine. Revisit once
-/// there's a measurement showing `tiny` (or `base`) is good enough for one
-/// side of the split. See BAS-25.
-pub fn build_listener() -> VoiceListener {
+/// Loads the Whisper model once at startup. Loading is slow (reads the
+/// whole model file), so `main` builds one `Transcriber` and reuses it
+/// across turns rather than reloading it per turn.
+pub fn build_transcriber() -> stt::Transcriber {
     let model_path = std::env::var("NALA_WHISPER_MODEL")
         .unwrap_or_else(|_| "data/whisper/ggml-small.bin".to_string());
-    let wake_model_path = std::env::var("NALA_WHISPER_WAKE_MODEL")
-        .unwrap_or_else(|_| "data/whisper/ggml-small.bin".to_string());
-    // whisper.cpp's own startup log (which would otherwise show the model
-    // size/type) is silenced in Transcriber::load, so this is the only
-    // visible confirmation of which models actually got loaded — including
-    // an env var left over from an earlier session, which is exactly the
-    // kind of thing that turns "slow" into "looks broken".
-    println!("🧠 Modelo Whisper (comando): {model_path}");
-    println!("🧠 Modelo Whisper (wake word): {wake_model_path}");
-    let transcriber =
-        Arc::new(stt::Transcriber::load(&model_path).expect("Failed to load Whisper model"));
-    let wake_transcriber = Arc::new(
-        stt::Transcriber::load(&wake_model_path).expect("Failed to load Whisper wake model"),
-    );
 
-    let audio = stt::MicStream::open().expect("Failed to open microphone");
-    println!("🎤 Micrófono: {}", audio.device_name());
-
-    let vad = stt::SileroVad::new().expect("Failed to build the voice activity detector");
-    let wake = stt::WhisperWake::new(wake_transcriber).with_check_callback(|text, elapsed| {
-        if !text.trim().is_empty() {
-            println!("👂 Escuché: \"{text}\" ({:.2}s)", elapsed.as_secs_f32());
-        } else {
-            println!(
-                "  [stt] wake check: {:.2}s (sin texto)",
-                elapsed.as_secs_f32()
-            );
-        }
-    });
-
-    stt::Listener::new(
-        audio,
-        vad,
-        wake,
-        transcriber,
-        stt::ListenerConfig::default(),
-    )
+    stt::Transcriber::load(&model_path).expect("Failed to load Whisper model")
 }

@@ -17,3 +17,7 @@ coverage.out
 # Whisper GGML models: downloaded by scripts/stt-setup.ps1, not checked in
 # (100 MB-3 GB depending on size, don't belong in the repo).
 /data/whisper/
+
+# Per-run token/cost metrics CSVs (data/metrics is the default
+# NALA_METRICS_DIR) — local usage logs, not part of the repo.
+/data/metrics/

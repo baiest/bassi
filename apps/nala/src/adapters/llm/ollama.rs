@@ -82,6 +82,9 @@ impl OllamaLlm {
             .text()
             .map_err(|error| LlmError::RequestFailed(error.to_string()))?;
 
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(LlmError::ModelNotFound(self.model.clone()));
+        }
         if !status.is_success() {
             return Err(LlmError::RequestFailed(format!(
                 "Ollama returned status {status}\nBody: {body}"

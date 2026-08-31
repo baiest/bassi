@@ -42,12 +42,7 @@ pub struct MicStream {
     _stream: cpal::Stream,
     ring: Arc<Mutex<Ring>>,
     device_name: String,
-    last_backlog_print: std::time::Instant,
 }
-
-/// How often to print how much unread audio is sitting in the ring — a
-/// direct, visual answer to "is the consumer keeping up with the mic".
-const BACKLOG_PRINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl MicStream {
     pub fn open() -> Result<Self, CaptureError> {
@@ -108,7 +103,6 @@ impl MicStream {
             _stream: stream,
             ring,
             device_name,
-            last_backlog_print: std::time::Instant::now(),
         })
     }
 
@@ -128,16 +122,7 @@ impl AudioSource for MicStream {
             {
                 let mut ring = self.ring.lock().expect("ring mutex poisoned");
                 if ring.read(out) {
-                    if ring.take_overrun() {
-                        eprintln!(
-                            "  [stt] mic: se perdió audio, el consumidor no da abasto (ring lleno)"
-                        );
-                    }
-                    if self.last_backlog_print.elapsed() >= BACKLOG_PRINT_INTERVAL {
-                        self.last_backlog_print = std::time::Instant::now();
-                        let backlog_ms = ring.len() * 1000 / WHISPER_SAMPLE_RATE as usize;
-                        eprintln!("  [stt] cola: {backlog_ms}ms de audio pendiente de procesar");
-                    }
+                    ring.take_overrun();
                     return true;
                 }
             }

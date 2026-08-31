@@ -14,6 +14,13 @@ pub enum LlmError {
     RequestFailed(String),
     #[error("invalid response: {0}")]
     InvalidResponse(String),
+    /// The backend answered but doesn't have the requested model loaded —
+    /// distinct from `RequestFailed` because retrying the identical
+    /// request is pointless (see `is_retryable` in `agent_loop.rs`) and
+    /// because callers can give a much more specific message than "some
+    /// request failed" (e.g. tell the user which model to pull).
+    #[error("model '{0}' not found")]
+    ModelNotFound(String),
 }
 
 /// Token accounting for one completed LLM call, when the backend reports

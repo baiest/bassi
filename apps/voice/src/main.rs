@@ -1,103 +1,85 @@
-use stt::{ListenMode, ListenerStatus};
+use nala::application::assistant::AssistantError;
+use nala::ports::llm::LlmError;
 use tts::Speech;
 use voice::bootstrap;
 
 fn main() {
-    let (mut assistant, speech, _chatterbox_supervisor) = bootstrap::build();
+    let (assistant, speech, _chatterbox_supervisor) = bootstrap::build();
+    let (mut assistant, cancel_signal) = nala::bootstrap::install_cancel_signal(assistant);
 
-    println!("Cargando el pipeline de escucha (VAD + wake word)...");
-    println!("⌨️  Enter en cualquier momento fuerza una captura (sin decir 'oye Nala')");
-    let (manual_trigger_tx, manual_trigger_rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if std::io::stdin().read_line(&mut line).is_err() {
-                break;
-            }
-            if manual_trigger_tx.send(()).is_err() {
-                break; // The listener is gone; nothing left to trigger.
-            }
-        }
-    });
-
-    let listener = bootstrap::build_listener().with_manual_trigger(manual_trigger_rx);
-    let mut listener = listener.with_status(|status| {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        print!("[{:.3}] ", ts.as_secs_f64());
-        match status {
-            ListenerStatus::Listening => println!("👂 Escuchando... (decí 'oye Nala')"),
-            ListenerStatus::Heard => println!("🎙️  ¡Te escuché!"),
-            ListenerStatus::Restarted => {
-                println!("🔁 Dijiste el prefijo de nuevo, reinicio la captura")
-            }
-            ListenerStatus::Capturing => println!("🎙️  Capturando..."),
-            ListenerStatus::MaxDurationReached => {
-                println!("⏱️  No detecté una pausa, corto acá y proceso igual")
-            }
-            ListenerStatus::Transcribing => println!("🤔 Procesando..."),
-            ListenerStatus::DiscardedTooShort => {
-                println!("🤏 Muy corto, descartado (sin transcribir)")
-            }
-            ListenerStatus::DiscardedNonsense => println!("🗑️  No entendí nada útil, descartado"),
-        }
-    });
+    let transcriber = bootstrap::build_transcriber();
 
     let greeting = "Hola, en que te puedo ayudar?";
     println!("{greeting}");
     let _ = speech.say(greeting);
-    // Without this, the mic starts listening while the greeting is still
-    // playing through the speakers — cold-start's 320ms discard window is
-    // nowhere near long enough to cover it, so the first wake-word check
-    // transcribes Nala's own "Hola" instead of the user. Every later turn
-    // already does this after its own answer; the greeting is the one
-    // case that isn't inside that loop.
     speech.flush();
 
-    // No cancel-signal handler here on purpose: it would swallow every
-    // Ctrl+C to cancel the current turn instead, and with no keyboard
-    // left in this loop (unlike push-to-talk's "salir") that leaves no
-    // way to exit the process at all. Ctrl+C keeps its default OS
-    // behaviour instead — it just closes the app, same as any other CLI.
-    let mut mode = ListenMode::WakeWord;
     loop {
-        let heard = match listener.listen(mode) {
-            Ok(heard) => heard,
+        println!("Apretá Enter para hablar (o escribí 'salir' para terminar)...");
+        let mut trigger = String::new();
+        match std::io::stdin().read_line(&mut trigger) {
+            Ok(0) => break, // stdin closed (EOF)
+            Ok(_) if trigger.trim().eq_ignore_ascii_case("salir") => break,
+            _ => {}
+        }
+
+        let audio = match stt::record_until_enter() {
+            Ok(audio) => audio,
             Err(e) => {
-                eprintln!("Error escuchando: {e}");
-                break;
+                eprintln!("Error grabando: {e}");
+                continue;
             }
         };
 
-        let Some(input) = heard else {
-            // A follow-up window expired, or its capture didn't pass the
-            // sanity filter — either way, go back to requiring the wake
-            // phrase rather than leaving the mic open indefinitely.
-            mode = ListenMode::WakeWord;
-            continue;
+        let input = match transcriber.transcribe(&audio.samples) {
+            Ok(text) if !text.trim().is_empty() => text,
+            Ok(_) => {
+                println!("No se entendió nada, probá de nuevo.");
+                continue;
+            }
+            Err(e) => {
+                eprintln!("Error transcribiendo: {e}");
+                continue;
+            }
         };
-
         println!("Vos: {input}");
 
-        match assistant.process(&input) {
+        #[cfg(windows)]
+        if let Some(signal) = &cancel_signal {
+            signal.reset();
+        }
+        #[cfg(not(windows))]
+        let _ = &cancel_signal;
+
+        match assistant.process(input.trim()) {
             Ok(response) => {
                 println!("{response}");
                 // The whole answer goes out in a single `say` call: a
                 // streaming backend starts playback on the first chunk
                 // rather than waiting for the full answer, so splitting
                 // this further would only add extra round-trips. flush()
-                // blocks until it's fully spoken, which is what keeps the
-                // microphone from hearing Nala's own voice once listening
-                // resumes.
+                // blocks until it's fully spoken, keeping the next
+                // recording from picking up Nala's own voice.
                 let _ = speech.say(&response);
                 speech.flush();
-                mode = ListenMode::FollowUp;
             }
             Err(e) => {
                 eprintln!("Error: {e}");
-                mode = ListenMode::WakeWord;
+                let spoken = match &e {
+                    AssistantError::Llm(LlmError::ModelNotFound(model)) => format!(
+                        "No encontré el modelo {model} en Ollama. Corré 'ollama pull {model}' y probá de nuevo."
+                    ),
+                    AssistantError::Llm(LlmError::RequestFailed(_)) => {
+                        "No pude conectarme con Ollama. Revisá que esté corriendo.".to_string()
+                    }
+                    AssistantError::Llm(LlmError::InvalidResponse(_)) => {
+                        "Ollama me respondió algo que no pude entender.".to_string()
+                    }
+                    AssistantError::Cancelled => "Cancelado.".to_string(),
+                    _ => "Tuve un error interno, revisá la consola.".to_string(),
+                };
+                let _ = speech.say(&spoken);
+                speech.flush();
             }
         }
     }

@@ -7,10 +7,13 @@ use nala::cli::prompt::MultilineReader;
 
 fn main() {
     let events = ConsoleEventSink;
-    // Off by default (NALA_METRICS_DIR unset) so development runs and tests
-    // don't scatter CSV files on disk; set it to opt into per-task token
-    // accounting for later cost estimation.
-    let metrics_dir = std::env::var("NALA_METRICS_DIR").ok().map(PathBuf::from);
+    // Defaults to data/metrics so every run gets token accounting without
+    // extra setup; override with NALA_METRICS_DIR to point elsewhere.
+    let metrics_dir = Some(
+        std::env::var("NALA_METRICS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("data/metrics")),
+    );
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
 

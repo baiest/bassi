@@ -183,10 +183,6 @@ impl<T: Transcribe + Send + 'static> WhisperWake<T> {
             return;
         }
 
-        eprintln!(
-            "  [stt] wake: transcribiendo {} samples...",
-            self.buffer.len()
-        );
         let job = WakeJob {
             generation: self.generation,
             samples: self.buffer.clone(),

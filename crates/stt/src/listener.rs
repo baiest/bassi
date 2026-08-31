@@ -168,7 +168,6 @@ where
         let mut capture: Vec<f32> = Vec::new();
         let mut chunk = [0.0_f32; CHUNK_SAMPLES];
         (self.on_status)(ListenerStatus::Listening);
-        let mut in_capture = false;
 
         loop {
             if !self.audio.next_chunk(&mut chunk) {
@@ -179,9 +178,6 @@ where
             let probability = self.vad.probability(&chunk);
             let was_active = self.gate.is_active();
             let speech = self.gate.update(probability);
-            if in_capture {
-                eprintln!("  [stt] vad: probabilidad={probability:.2} speech={speech}");
-            }
 
             if speech && !was_active {
                 self.prime_wake_detector();
@@ -195,15 +191,11 @@ where
                 .manual_trigger
                 .as_ref()
                 .is_some_and(|trigger| trigger.try_iter().count() > 0);
-            if forced {
-                eprintln!("  [stt] disparo manual (Enter)");
-            }
             let wake = detected || forced;
 
             match session.observe(speech, wake) {
                 Action::Idle => {}
                 Action::StartCapture => {
-                    in_capture = true;
                     (self.on_status)(ListenerStatus::Heard);
                     (self.on_status)(ListenerStatus::Capturing);
                     capture.clear();
@@ -211,7 +203,6 @@ where
                     capture.extend_from_slice(&chunk);
                 }
                 Action::RestartCapture => {
-                    in_capture = true;
                     (self.on_status)(ListenerStatus::Restarted);
                     self.wake.reset();
                     capture.clear();
@@ -225,20 +216,12 @@ where
                     capture.extend_from_slice(&chunk);
                 }
                 action @ (Action::Complete | Action::CompleteMaxDuration) => {
-                    in_capture = false;
                     self.wake.reset();
                     if action == Action::CompleteMaxDuration {
                         (self.on_status)(ListenerStatus::MaxDurationReached);
                     }
                     (self.on_status)(ListenerStatus::Transcribing);
-                    eprintln!("  [stt] final: transcribiendo {} samples...", capture.len());
-                    let started = std::time::Instant::now();
                     let raw = self.transcriber.transcribe(&capture)?;
-                    eprintln!(
-                        "  [stt] transcripción final: {:.2}s ({} samples)",
-                        started.elapsed().as_secs_f32(),
-                        capture.len()
-                    );
                     let text = strip_wake_prefix(&raw);
 
                     if is_sane(&text) {
@@ -257,7 +240,6 @@ where
                     capture.clear();
                 }
                 Action::Discard => {
-                    in_capture = false;
                     (self.on_status)(ListenerStatus::DiscardedTooShort);
                     self.wake.reset();
                     capture.clear();
