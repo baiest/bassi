@@ -12,6 +12,7 @@ use std::thread;
 use agent_protocol::{ClientMessage, Event, EventSink, ServerMessage};
 use tungstenite::{Message, WebSocket};
 
+use crate::adapters::events::console::ConsoleEventSink;
 use crate::application::assistant::Assistant;
 use crate::bootstrap;
 use crate::ports::llm::Llm;
@@ -59,37 +60,50 @@ impl<S: std::io::Read + std::io::Write> Wire for WebSocket<S> {
 /// so a client watching the connection sees progress narration while
 /// `Assistant::process` is still running. Shared via `Arc<Mutex<_>>` with the
 /// session loop, which also uses the same wire to send the final `Reply`.
-pub struct WsEventSink<W> {
+/// Also forwards every event to `inner` — same wrap-and-forward pattern as
+/// `CsvMetricsSink` — so the server's own console shows a turn's progress
+/// too, not just whatever client happens to be connected.
+pub struct WsEventSink<E, W> {
+    inner: E,
     wire: Arc<Mutex<W>>,
 }
 
-impl<W> WsEventSink<W> {
-    pub fn new(wire: Arc<Mutex<W>>) -> Self {
-        Self { wire }
+impl<E, W> WsEventSink<E, W> {
+    pub fn new(inner: E, wire: Arc<Mutex<W>>) -> Self {
+        Self { inner, wire }
     }
 }
 
-impl<W: Wire> EventSink for WsEventSink<W> {
+impl<E: EventSink, W: Wire> EventSink for WsEventSink<E, W> {
     fn emit(&mut self, event: Event) {
         // A send failure here just means the client won't see this one
         // progress update — the turn itself keeps running, and the final
         // Reply/Error send (in `run_session`) is what surfaces a truly dead
         // connection. Still logged (not swallowed) so a broken connection
         // shows up in the server's own console, not just the client's.
-        if let Err(error) = self.wire.lock().unwrap().send(ServerMessage::Event(event)) {
+        if let Err(error) = self
+            .wire
+            .lock()
+            .unwrap()
+            .send(ServerMessage::Event(event.clone()))
+        {
             eprintln!("Warning: could not send a progress event to the client: {error}");
         }
+        self.inner.emit(event);
     }
 }
 
 /// Runs one connection's session loop: read an `Input`, run it through the
 /// assistant (whose events stream out via `wire` as they happen), send back
 /// the `Reply`/`Error`, repeat until the client disconnects.
-pub fn run_session<L, D, W>(mut assistant: Assistant<L, D, WsEventSink<W>>, wire: Arc<Mutex<W>>)
-where
+pub fn run_session<L, D, E, W>(
+    mut assistant: Assistant<L, D, WsEventSink<E, W>>,
+    wire: Arc<Mutex<W>>,
+) where
     L: Llm + Send + 'static,
     D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
+    E: EventSink,
     W: Wire,
 {
     loop {
@@ -137,7 +151,7 @@ fn handle_connection(stream: TcpStream) {
     };
 
     let wire = Arc::new(Mutex::new(ws));
-    let events = WsEventSink::new(Arc::clone(&wire));
+    let events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
     let assistant = bootstrap::build_assistant(events);
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that

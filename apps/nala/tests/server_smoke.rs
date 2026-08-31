@@ -10,12 +10,17 @@ mod fake_llm;
 #[allow(dead_code)]
 mod fake_computer;
 
+#[path = "common/fake_events.rs"]
+#[allow(dead_code)]
+mod fake_events;
+
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use agent_protocol::{ClientMessage, ServerMessage};
 use fake_computer::FakeComputer;
+use fake_events::RecordingEventSink;
 use fake_llm::AlwaysRepliesTextLlm;
 use nala::application::assistant::Assistant;
 use nala::application::tools::Tool;
@@ -46,7 +51,7 @@ fn a_client_can_complete_one_turn_over_a_real_socket() {
             AlwaysRepliesTextLlm::new(),
             dispatcher,
             registry,
-            WsEventSink::new(Arc::clone(&wire)),
+            WsEventSink::new(RecordingEventSink::new(), Arc::clone(&wire)),
         );
 
         run_session(assistant, wire);

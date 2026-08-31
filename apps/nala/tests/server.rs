@@ -6,11 +6,16 @@ mod fake_llm;
 #[allow(dead_code)]
 mod fake_computer;
 
+#[path = "common/fake_events.rs"]
+#[allow(dead_code)]
+mod fake_events;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use agent_protocol::{ClientMessage, ServerMessage};
 use fake_computer::FakeComputer;
+use fake_events::RecordingEventSink;
 use fake_llm::{AlwaysRepliesTextLlm, FailingLlm};
 use nala::application::assistant::Assistant;
 use nala::application::tools::Tool;
@@ -50,7 +55,7 @@ impl Wire for FakeWire {
 fn assistant_with<L>(
     llm: L,
     wire: Arc<Mutex<FakeWire>>,
-) -> Assistant<L, ToolDispatcher<FakeComputer>, WsEventSink<FakeWire>>
+) -> Assistant<L, ToolDispatcher<FakeComputer>, WsEventSink<RecordingEventSink, FakeWire>>
 where
     L: nala::ports::llm::Llm + Send + 'static,
 {
@@ -62,7 +67,12 @@ where
         FakeComputer::new(),
     )));
 
-    Assistant::new(llm, dispatcher, registry, WsEventSink::new(wire))
+    Assistant::new(
+        llm,
+        dispatcher,
+        registry,
+        WsEventSink::new(RecordingEventSink::new(), wire),
+    )
 }
 
 fn only_reply_and_event_messages(sent: &[ServerMessage]) -> (usize, usize) {
