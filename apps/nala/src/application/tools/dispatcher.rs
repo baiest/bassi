@@ -5,7 +5,8 @@ use crate::{
     application::tools::{
         Tool, current_time::CurrentTimeTool, execute_command::ExecuteCommandTool,
         fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
-        ping::PingTool, web_search::WebSearchTool,
+        open_app::OpenAppTool, open_url::OpenUrlTool, ping::PingTool, volume::VolumeTool,
+        web_search::WebSearchTool,
     },
     ports::{
         computer::Computer,
@@ -88,6 +89,9 @@ pub enum Tools<
     M: McpClient = NoMcpClient,
 > {
     ExecuteCommand(ExecuteCommandTool<C>),
+    OpenUrl(OpenUrlTool<C>),
+    OpenApp(OpenAppTool<C>),
+    Volume(VolumeTool<C>),
     Ping(PingTool),
     CurrentTime(CurrentTimeTool<CL>),
     GetWeather(GetWeatherTool<H>),
@@ -168,6 +172,51 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcherPor
                         text,
                         images: Vec::new(),
                         mutated: ExecuteCommandTool::<C>::MUTATING,
+                    });
+                }
+                Tools::OpenUrl(tool) if tool_call.name == OpenUrlTool::<C>::NAME => {
+                    let args = OpenUrlTool::<C>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    let text = tool
+                        .execute(args)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
+
+                    return Ok(ToolOutcome {
+                        text,
+                        images: Vec::new(),
+                        mutated: OpenUrlTool::<C>::MUTATING,
+                    });
+                }
+                Tools::OpenApp(tool) if tool_call.name == OpenAppTool::<C>::NAME => {
+                    let args = OpenAppTool::<C>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    let text = tool
+                        .execute(args)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
+
+                    return Ok(ToolOutcome {
+                        text,
+                        images: Vec::new(),
+                        mutated: OpenAppTool::<C>::MUTATING,
+                    });
+                }
+                Tools::Volume(tool) if tool_call.name == VolumeTool::<C>::NAME => {
+                    let args = VolumeTool::<C>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    let text = tool
+                        .execute(args)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
+
+                    return Ok(ToolOutcome {
+                        text,
+                        images: Vec::new(),
+                        mutated: VolumeTool::<C>::MUTATING,
                     });
                 }
                 Tools::Ping(tool) if tool_call.name == PingTool::NAME => {
