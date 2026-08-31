@@ -1,13 +1,18 @@
+use chrono::{DateTime, Local};
 use mcp::McpClient;
 
 use crate::{
     application::tools::{
-        Tool, execute_command::ExecuteCommandTool, mcp_toolset::McpToolset, ping::PingTool,
+        Tool, current_time::CurrentTimeTool, execute_command::ExecuteCommandTool,
+        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
+        ping::PingTool, web_search::WebSearchTool,
     },
     ports::{
         computer::Computer,
+        http::{HttpError, HttpFetcher},
         llm::ToolCall,
         tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOutcome},
+        wall_clock::WallClock,
     },
 };
 
@@ -45,38 +50,85 @@ impl McpClient for NoMcpClient {
     }
 }
 
+/// A `WallClock` that never gets used — the default for `CL` so callers
+/// that don't register a `current_time` tool (most tests) don't have to
+/// name a wall-clock type at all.
+#[derive(Debug, Default)]
+pub struct NoWallClock;
+
+impl WallClock for NoWallClock {
+    fn now_local(&self) -> DateTime<Local> {
+        Local::now()
+    }
+}
+
+/// An `HttpFetcher` that always fails — the default for `H` so callers that
+/// don't register any of the HTTP-backed tools (most tests) don't have to
+/// name an HTTP client type at all.
+#[derive(Debug, Default)]
+pub struct NoHttpFetcher;
+
+impl HttpFetcher for NoHttpFetcher {
+    fn get(&self, _url: &str) -> Result<String, HttpError> {
+        Err(HttpError::Request(
+            "NoHttpFetcher is never connected".to_string(),
+        ))
+    }
+}
+
 /// One variant per `Tool` implementation the dispatcher knows how to run.
 /// Adding a native tool means adding a variant here and a match arm below —
 /// both checked exhaustively at compile time, no runtime type erasure. MCP
 /// tools all share one variant, since their identities are only known once
 /// connected to a server.
-pub enum Tools<C: Computer, M: McpClient = NoMcpClient> {
+pub enum Tools<
+    C: Computer,
+    CL: WallClock = NoWallClock,
+    H: HttpFetcher = NoHttpFetcher,
+    M: McpClient = NoMcpClient,
+> {
     ExecuteCommand(ExecuteCommandTool<C>),
     Ping(PingTool),
-    Mcp(McpToolset<M>),
+    CurrentTime(CurrentTimeTool<CL>),
+    GetWeather(GetWeatherTool<H>),
+    WebSearch(WebSearchTool<H>),
+    FetchUrl(FetchUrlTool<H>),
+    // One `McpToolset` per connected server, so a tool-name collision
+    // across servers is resolved by taking the first one that handles it —
+    // see `dispatch` below.
+    Mcp(Vec<McpToolset<M>>),
 }
 
-pub struct ToolDispatcher<C: Computer, M: McpClient = NoMcpClient> {
-    tools: Vec<Tools<C, M>>,
+pub struct ToolDispatcher<
+    C: Computer,
+    CL: WallClock = NoWallClock,
+    H: HttpFetcher = NoHttpFetcher,
+    M: McpClient = NoMcpClient,
+> {
+    tools: Vec<Tools<C, CL, H, M>>,
 }
 
-impl<C: Computer, M: McpClient> ToolDispatcher<C, M> {
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcher<C, CL, H, M> {
     pub fn new() -> Self {
         Self { tools: Vec::new() }
     }
 
-    pub fn register(&mut self, tool: Tools<C, M>) {
+    pub fn register(&mut self, tool: Tools<C, CL, H, M>) {
         self.tools.push(tool);
     }
 }
 
-impl<C: Computer, M: McpClient> Default for ToolDispatcher<C, M> {
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> Default
+    for ToolDispatcher<C, CL, H, M>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcherPort
+    for ToolDispatcher<C, CL, H, M>
+{
     type Output = ToolOutcome;
     type Error = ToolDispatcherError;
 
@@ -128,7 +180,54 @@ impl<C: Computer, M: McpClient> ToolDispatcherPort for ToolDispatcher<C, M> {
                         .map(ToolOutcome::from)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
-                Tools::Mcp(toolset) if toolset.handles(&tool_call.name) => {
+                Tools::CurrentTime(tool) if tool_call.name == CurrentTimeTool::<CL>::NAME => {
+                    CurrentTimeTool::<CL>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    return tool
+                        .execute(())
+                        .map(ToolOutcome::from)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                }
+                Tools::GetWeather(tool) if tool_call.name == GetWeatherTool::<H>::NAME => {
+                    let args = GetWeatherTool::<H>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    return tool
+                        .execute(args)
+                        .map(ToolOutcome::from)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                }
+                Tools::WebSearch(tool) if tool_call.name == WebSearchTool::<H>::NAME => {
+                    let args = WebSearchTool::<H>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    return tool
+                        .execute(args)
+                        .map(ToolOutcome::from)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                }
+                Tools::FetchUrl(tool) if tool_call.name == FetchUrlTool::<H>::NAME => {
+                    let args = FetchUrlTool::<H>::parse_arguments(&tool_call.arguments).map_err(
+                        |error| ToolDispatcherError::ToolErrorParsingArguments(Box::new(error)),
+                    )?;
+
+                    return tool
+                        .execute(args)
+                        .map(ToolOutcome::from)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                }
+                Tools::Mcp(toolsets) => {
+                    let Some(toolset) = toolsets
+                        .iter_mut()
+                        .find(|toolset| toolset.handles(&tool_call.name))
+                    else {
+                        continue;
+                    };
+
                     let result = toolset
                         .call(&tool_call.name, &tool_call.arguments)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;

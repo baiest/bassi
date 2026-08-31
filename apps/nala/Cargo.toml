@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = { workspace = true }
 csv = "1"
 mcp = { path = "../../crates/mcp" }
 process-group = { path = "../../crates/process-group" }
 reedline = "0.38"
+regex = { workspace = true }
 reqwest = { workspace = true }
 schemars = "0.8"
 serde = { workspace = true }
