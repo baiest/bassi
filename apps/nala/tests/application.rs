@@ -25,6 +25,15 @@ mod fake_cancel;
 #[path = "application/tools/execute_command.rs"]
 mod execute_command;
 
+#[path = "application/tools/open_url.rs"]
+mod open_url;
+
+#[path = "application/tools/open_app.rs"]
+mod open_app;
+
+#[path = "application/tools/volume.rs"]
+mod volume;
+
 #[path = "application/tools/registry.rs"]
 mod registry;
 

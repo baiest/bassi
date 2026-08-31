@@ -7,7 +7,10 @@ use nala::application::tools::dispatcher::{
 };
 use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::mcp_toolset::McpToolset;
+use nala::application::tools::open_app::OpenAppTool;
+use nala::application::tools::open_url::OpenUrlTool;
 use nala::application::tools::ping::PingTool;
+use nala::application::tools::volume::VolumeTool;
 use nala::ports::llm::ToolCall;
 use nala::ports::tool_dispatcher::ToolDispatcher as _;
 
@@ -188,6 +191,54 @@ fn attaches_before_and_after_computer_state_to_execute_command() {
     // this exercises the "unchanged" branch rather than a diff — the
     // "changed" branch is exercised end-to-end by the real Windows adapter.
     assert!(outcome.text.contains("State unchanged:"));
+}
+
+#[test]
+fn dispatches_open_url_and_marks_it_mutated() {
+    let computer = FakeComputer::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::OpenUrl(OpenUrlTool::new(computer)));
+
+    let tool_call = ToolCall {
+        name: "open_url".to_string(),
+        arguments: r#"{"url":"https://example.com"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
+}
+
+#[test]
+fn dispatches_open_app_and_marks_it_mutated() {
+    let computer = FakeComputer::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::OpenApp(OpenAppTool::new(computer)));
+
+    let tool_call = ToolCall {
+        name: "open_app".to_string(),
+        arguments: r#"{"app":"notepad"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
+}
+
+#[test]
+fn dispatches_volume_and_marks_it_mutated() {
+    let computer = FakeComputer::new();
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::Volume(VolumeTool::new(computer)));
+
+    let tool_call = ToolCall {
+        name: "volume".to_string(),
+        arguments: r#"{"action":"up"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
 }
 
 #[test]
