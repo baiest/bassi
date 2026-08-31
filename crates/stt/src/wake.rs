@@ -32,10 +32,16 @@ pub trait WakeDetector {
     fn reset(&mut self);
 }
 
-/// How much audio to accumulate before attempting a transcription. Short
-/// enough to catch the wake phrase without much delay, long enough to
-/// contain it — "oye Nala" is roughly 700 ms spoken at a normal pace.
-const CHECK_INTERVAL_CHUNKS: usize = 25; // 800 ms at 32 ms/chunk
+/// How often to attempt a transcription of the accumulated buffer. This
+/// doesn't need to cover the whole phrase — the buffer itself keeps
+/// growing across checks (see `MAX_BUFFER_CHUNKS`), so a short interval
+/// just means re-checking a still-growing buffer more often. With checks
+/// running on their own thread (see `WhisperWake`'s docs), a busy worker
+/// simply makes `maybe_start_check` skip this interval rather than
+/// blocking, so a short interval costs nothing beyond a few skipped
+/// attempts — and it means the next check starts almost immediately once
+/// the worker frees up, instead of waiting up to the old 800ms.
+const CHECK_INTERVAL_CHUNKS: usize = 3; // ~100 ms at 32 ms/chunk
 
 /// Caps how much audio is kept without a detection, so a long ramble
 /// that's never prefixed doesn't grow the buffer (or the transcription
