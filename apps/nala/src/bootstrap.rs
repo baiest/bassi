@@ -24,6 +24,7 @@ use crate::application::tools::dispatcher::{ToolDispatcher, Tools};
 use crate::application::tools::execute_command::ExecuteCommandTool;
 use crate::application::tools::fetch_url::FetchUrlTool;
 use crate::application::tools::get_weather::GetWeatherTool;
+use crate::application::tools::list_apps::ListAppsTool;
 use crate::application::tools::mcp_toolset::McpToolset;
 use crate::application::tools::open_app::OpenAppTool;
 use crate::application::tools::open_url::OpenUrlTool;
@@ -70,12 +71,14 @@ pub fn build_assistant<E: EventSink>(events: E) -> Assistant<OllamaLlm, Dispatch
     let open_url_computer = Windows::new(WindowsProcess::new(), SystemEnvironment::new());
     let open_app_computer = Windows::new(WindowsProcess::new(), SystemEnvironment::new());
     let volume_computer = Windows::new(WindowsProcess::new(), SystemEnvironment::new());
+    let list_apps_computer = Windows::new(WindowsProcess::new(), SystemEnvironment::new());
 
     let mut registry = ToolRegistry::new();
     registry.register(ExecuteCommandTool::<ComputerType>::definition());
     registry.register(OpenUrlTool::<ComputerType>::definition());
     registry.register(OpenAppTool::<ComputerType>::definition());
     registry.register(VolumeTool::<ComputerType>::definition());
+    registry.register(ListAppsTool::<ComputerType>::definition());
     registry.register(PingTool::definition());
     registry.register(CurrentTimeTool::<SystemWallClock>::definition());
     registry.register(GetWeatherTool::<ReqwestFetcher>::definition());
@@ -87,6 +90,7 @@ pub fn build_assistant<E: EventSink>(events: E) -> Assistant<OllamaLlm, Dispatch
     dispatcher.register(Tools::OpenUrl(OpenUrlTool::new(open_url_computer)));
     dispatcher.register(Tools::OpenApp(OpenAppTool::new(open_app_computer)));
     dispatcher.register(Tools::Volume(VolumeTool::new(volume_computer)));
+    dispatcher.register(Tools::ListApps(ListAppsTool::new(list_apps_computer)));
     dispatcher.register(Tools::Ping(PingTool::new()));
     dispatcher.register(Tools::CurrentTime(CurrentTimeTool::new(
         SystemWallClock::new(),

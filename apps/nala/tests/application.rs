@@ -34,6 +34,9 @@ mod open_app;
 #[path = "application/tools/volume.rs"]
 mod volume;
 
+#[path = "application/tools/list_apps.rs"]
+mod list_apps;
+
 #[path = "application/tools/registry.rs"]
 mod registry;
 
