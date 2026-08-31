@@ -74,8 +74,11 @@ impl<W: Wire> EventSink for WsEventSink<W> {
         // A send failure here just means the client won't see this one
         // progress update — the turn itself keeps running, and the final
         // Reply/Error send (in `run_session`) is what surfaces a truly dead
-        // connection.
-        let _ = self.wire.lock().unwrap().send(ServerMessage::Event(event));
+        // connection. Still logged (not swallowed) so a broken connection
+        // shows up in the server's own console, not just the client's.
+        if let Err(error) = self.wire.lock().unwrap().send(ServerMessage::Event(event)) {
+            eprintln!("Warning: could not send a progress event to the client: {error}");
+        }
     }
 }
 
@@ -95,11 +98,19 @@ where
             Ok(Some(ClientMessage::Input { text })) => {
                 let outcome = match assistant.process(&text) {
                     Ok(text) => ServerMessage::Reply { text },
-                    Err(error) => ServerMessage::Error {
-                        message: error.to_string(),
-                    },
+                    Err(error) => {
+                        // Printed here (not just sent to the client) so a
+                        // failing turn is visible in the server's own
+                        // console — matching what the local REPL does.
+                        eprintln!("Error: {error}");
+                        ServerMessage::Error {
+                            message: error.to_string(),
+                        }
+                    }
                 };
-                let _ = wire.lock().unwrap().send(outcome);
+                if let Err(error) = wire.lock().unwrap().send(outcome) {
+                    eprintln!("Warning: could not send the reply to the client: {error}");
+                }
             }
             // No cancellation support over the wire yet — the local Ctrl+C
             // signal is the only cancel source today; a remote client's
@@ -108,7 +119,10 @@ where
             // clients that already send it.
             Ok(Some(ClientMessage::Cancel)) => {}
             Ok(None) => break,
-            Err(_) => break,
+            Err(error) => {
+                eprintln!("Warning: connection error, ending this session: {error}");
+                break;
+            }
         }
     }
 }
@@ -125,8 +139,14 @@ fn handle_connection(stream: TcpStream) {
     let wire = Arc::new(Mutex::new(ws));
     let events = WsEventSink::new(Arc::clone(&wire));
     let assistant = bootstrap::build_assistant(events);
-    let (assistant, _cancel_signal) = bootstrap::install_cancel_signal(assistant);
 
+    // Deliberately not `bootstrap::install_cancel_signal` here: that
+    // installs a Windows console handler which swallows Ctrl+C (so the
+    // default "terminate the process" action never runs) in exchange for
+    // being able to cancel the turn currently in flight. A server has no
+    // per-turn Ctrl+C to catch — its console Ctrl+C should just stop the
+    // process, same as any other server — so installing it here would
+    // leave `nala --serve` impossible to stop from its own console.
     run_session(assistant, wire);
 }
 
