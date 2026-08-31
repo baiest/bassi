@@ -1,48 +1,53 @@
 //! The composition root for the voice front end: builds the speech backend,
-//! wraps it around Nala's event chain, and builds the assistant on top of
-//! it. `main.rs` only runs the result.
+//! wraps it around a narrator, and connects to Nala as a separate process.
+//! `main.rs` only runs the result.
 
-use std::path::PathBuf;
-
-use nala::adapters::events::console::ConsoleEventSink;
-use nala::adapters::llm::ollama::OllamaLlm;
-use nala::adapters::metrics::csv_sink::CsvMetricsSink;
-use nala::application::assistant::Assistant;
-use nala::bootstrap::{self, DEFAULT_MODEL, DispatcherType};
+use agent_protocol::EventSink;
 
 use tts::{AsyncSpeech, ChatterboxSupervisor, speech_backend};
 
+use crate::client::{ClientError, NalaClient, TcpWire};
 use crate::narration::TemplateNarrator;
 use crate::speaking_sink::SpeakingEventSink;
 
-type Events = CsvMetricsSink<SpeakingEventSink<ConsoleEventSink, TemplateNarrator>>;
-type VoiceAssistant = Assistant<OllamaLlm, DispatcherType, Events>;
+/// A sink with nothing further to forward events to — Voice's only local
+/// consumer of events is narration; per-task metrics now live server-side,
+/// next to the agent that actually produces them.
+pub struct NoopEventSink;
 
-/// Builds the speech backend, an `AsyncSpeech` handle to it, and the fully
-/// wired `Assistant` narrating through the same speech queue. Returns the
+impl EventSink for NoopEventSink {
+    fn emit(&mut self, _event: agent_protocol::Event) {}
+}
+
+pub type Events = SpeakingEventSink<NoopEventSink, TemplateNarrator>;
+
+/// Default address `voice` connects to, overridable with `NALA_ADDR` —
+/// matches `nala --serve`'s own default.
+const DEFAULT_ADDR: &str = "127.0.0.1:4180";
+
+/// Builds the speech backend, an `AsyncSpeech` handle to it, the narrating
+/// event sink, and connects to Nala over WebSocket. Returns the
 /// `AsyncSpeech` handle separately so `main` can speak the final answer
-/// after `process()` returns, and the `ChatterboxSupervisor` (if one was
+/// after a turn completes, and the `ChatterboxSupervisor` (if one was
 /// started) so `main` can keep it alive.
-pub fn build() -> (VoiceAssistant, AsyncSpeech, Option<ChatterboxSupervisor>) {
+pub fn build() -> Result<
+    (
+        NalaClient<TcpWire>,
+        Events,
+        AsyncSpeech,
+        Option<ChatterboxSupervisor>,
+    ),
+    ClientError,
+> {
     let (backend, chatterbox_supervisor) = speech_backend();
     let speech = AsyncSpeech::new(backend);
 
-    let events = ConsoleEventSink;
-    let events = SpeakingEventSink::new(events, TemplateNarrator::new(), speech.clone());
+    let events = SpeakingEventSink::new(NoopEventSink, TemplateNarrator::new(), speech.clone());
 
-    // Defaults to data/metrics so every run gets token accounting without
-    // extra setup; override with NALA_METRICS_DIR to point elsewhere.
-    let metrics_dir = Some(
-        std::env::var("NALA_METRICS_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("data/metrics")),
-    );
-    let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-    let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
+    let addr = std::env::var("NALA_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
+    let client = NalaClient::new(TcpWire::connect(&addr)?);
 
-    let assistant = bootstrap::build_assistant(events);
-
-    (assistant, speech, chatterbox_supervisor)
+    Ok((client, events, speech, chatterbox_supervisor))
 }
 
 /// Loads the Whisper model once at startup. Loading is slow (reads the

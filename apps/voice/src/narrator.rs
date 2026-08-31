@@ -1,4 +1,4 @@
-use nala::ports::events::Event;
+use agent_protocol::Event;
 
 /// Decides what to say out loud in reaction to a turn event — pure text, no
 /// audio. Kept separate from `tts::Speech` so the phrase-selection policy
