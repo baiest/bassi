@@ -16,7 +16,7 @@ mod speech;
 
 pub use async_speech::AsyncSpeech;
 pub use audio::RodioPlayer;
-pub use backend::{NullSpeech, speech_backend};
+pub use backend::{NullSpeech, speech_backend, stream_synthesizer};
 pub use chatterbox::ChatterboxSupervisor;
 pub use pcm::{PcmStream, PlayPcmStream, StreamSynthesizeSpeech};
 pub use speech::{Speech, SpeechError};

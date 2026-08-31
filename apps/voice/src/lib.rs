@@ -4,8 +4,10 @@
 //! a library — Voice depends on `agent-protocol` for the shared wire types,
 //! never on `nala` itself.
 
+pub mod audio_server;
 pub mod bootstrap;
 pub mod client;
 pub mod narration;
 pub mod narrator;
 pub mod speaking_sink;
+pub mod wav;

@@ -2585,6 +2585,7 @@ name = "voice"
 version = "0.1.0"
 dependencies = [
  "agent-protocol",
+ "hound",
  "serde_json",
  "stt",
  "thiserror 2.0.20",

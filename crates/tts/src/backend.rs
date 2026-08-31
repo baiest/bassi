@@ -1,6 +1,7 @@
 use crate::audio::RodioPlayer;
 use crate::chatterbox::config::ChatterboxConfig;
 use crate::chatterbox::{ChatterboxSupervisor, HttpChatterbox};
+use crate::pcm::StreamSynthesizeSpeech;
 use crate::piper::PiperSpeech;
 use crate::piper::config::PiperConfig;
 use crate::speech::{Speech, SpeechError};
@@ -56,6 +57,45 @@ pub fn speech_backend() -> (Box<dyn Speech + Send>, Option<ChatterboxSupervisor>
                 (Box::new(WindowsSapiSpeech::new()), None)
             }
         },
+    }
+}
+
+/// Resolves a raw `StreamSynthesizeSpeech` from `NALA_TTS` (`piper` |
+/// `chatterbox`, default `piper`) — the PCM producer without the
+/// player/`AsyncSpeech` wrapping `speech_backend` adds, for a caller that
+/// wants the synthesized audio itself (e.g. to forward it over a socket)
+/// rather than to play it on this machine. `sapi`/`off` aren't PCM-stream
+/// backends, so they're not offered here; unlike `speech_backend`, failures
+/// are returned rather than silently falling back, since there's no local
+/// speaker to fall back to being audible on.
+pub fn stream_synthesizer() -> Result<
+    (
+        Box<dyn StreamSynthesizeSpeech + Send>,
+        Option<ChatterboxSupervisor>,
+    ),
+    SpeechError,
+> {
+    match std::env::var("NALA_TTS").as_deref() {
+        Ok("chatterbox") => {
+            let config = ChatterboxConfig::from_env()?;
+            let supervisor = ChatterboxSupervisor::ensure_running(&config)?;
+            let synth = HttpChatterbox::new(
+                &config.base_url,
+                &config.voice,
+                config.exaggeration,
+                config.cfg_weight,
+                config.temperature,
+                &config.streaming_strategy,
+                config.streaming_chunk_size,
+                config.timeout,
+                config.read_timeout,
+            );
+            Ok((Box::new(synth), Some(supervisor)))
+        }
+        _ => {
+            let config = PiperConfig::from_env()?;
+            Ok((Box::new(PiperSpeech::new(config)), None))
+        }
     }
 }
 
