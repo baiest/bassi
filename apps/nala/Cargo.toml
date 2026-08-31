@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+agent-protocol = { path = "../../crates/agent-protocol" }
 chrono = { workspace = true }
 csv = "1"
 mcp = { path = "../../crates/mcp" }
@@ -15,6 +16,7 @@ schemars = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tungstenite = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

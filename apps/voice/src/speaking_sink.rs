@@ -1,4 +1,4 @@
-use nala::ports::events::{Event, EventSink};
+use agent_protocol::{Event, EventSink};
 use tts::AsyncSpeech;
 
 use crate::narrator::Narrator;

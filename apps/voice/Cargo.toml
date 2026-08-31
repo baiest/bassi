@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nala = { path = "../nala" }
+agent-protocol = { path = "../../crates/agent-protocol" }
+serde_json = { workspace = true }
 stt = { path = "../../crates/stt" }
+thiserror = { workspace = true }
 tts = { path = "../../crates/tts" }
+tungstenite = { workspace = true }

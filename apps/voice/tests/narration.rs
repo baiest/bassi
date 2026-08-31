@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nala::ports::events::{Event, LlmCallId, TaskId, TurnState};
+use agent_protocol::{Event, LlmCallId, TaskId, TurnState};
 use voice::narration::TemplateNarrator;
 use voice::narrator::Narrator;
 

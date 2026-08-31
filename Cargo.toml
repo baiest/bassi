@@ -2,6 +2,7 @@
 members = [
     "apps/nala",
     "apps/voice",
+    "crates/agent-protocol",
     "crates/mcp",
     "crates/tts",
     "crates/stt",
@@ -16,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+tungstenite = "0.24"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",

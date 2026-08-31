@@ -1,4 +1,4 @@
-use nala::ports::events::{Event, EventSink};
+use agent_protocol::{Event, EventSink};
 
 /// Records every emitted event so tests can inspect what happened during a
 /// turn.

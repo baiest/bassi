@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nala::ports::events::{Event, TurnState};
+use agent_protocol::{Event, TurnState};
 
 use crate::narrator::Narrator;
 

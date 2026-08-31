@@ -8,9 +8,9 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::sync::mpsc;
 
+use agent_protocol::{Event, EventSink, LlmCallId, TaskId};
 use fake_events::RecordingEventSink;
 use fake_speech::SpySpeech;
-use nala::ports::events::{Event, EventSink, LlmCallId, TaskId};
 use tts::{AsyncSpeech, Speech, SpeechError};
 use voice::narrator::Narrator;
 use voice::speaking_sink::SpeakingEventSink;

@@ -1,11 +1,16 @@
-use nala::application::assistant::AssistantError;
-use nala::ports::llm::LlmError;
+use agent_protocol::EventSink;
 use tts::Speech;
 use voice::bootstrap;
+use voice::client::ClientError;
 
 fn main() {
-    let (assistant, speech, _chatterbox_supervisor) = bootstrap::build();
-    let (mut assistant, cancel_signal) = nala::bootstrap::install_cancel_signal(assistant);
+    let (mut client, mut events, speech, _chatterbox_supervisor) = match bootstrap::build() {
+        Ok(built) => built,
+        Err(error) => {
+            eprintln!("Error: {error}");
+            std::process::exit(1);
+        }
+    };
 
     let transcriber = bootstrap::build_transcriber();
 
@@ -44,14 +49,7 @@ fn main() {
         };
         println!("Vos: {input}");
 
-        #[cfg(windows)]
-        if let Some(signal) = &cancel_signal {
-            signal.reset();
-        }
-        #[cfg(not(windows))]
-        let _ = &cancel_signal;
-
-        match assistant.process(input.trim()) {
+        match client.send(input.trim(), |event| events.emit(event)) {
             Ok(response) => {
                 println!("{response}");
                 // The whole answer goes out in a single `say` call: a
@@ -66,17 +64,12 @@ fn main() {
             Err(e) => {
                 eprintln!("Error: {e}");
                 let spoken = match &e {
-                    AssistantError::Llm(LlmError::ModelNotFound(model)) => format!(
-                        "No encontré el modelo {model} en Ollama. Corré 'ollama pull {model}' y probá de nuevo."
-                    ),
-                    AssistantError::Llm(LlmError::RequestFailed(_)) => {
-                        "No pude conectarme con Ollama. Revisá que esté corriendo.".to_string()
+                    ClientError::Connect(_) | ClientError::Io(_) => {
+                        "No pude conectarme con Nala. Revisá que esté corriendo.".to_string()
                     }
-                    AssistantError::Llm(LlmError::InvalidResponse(_)) => {
-                        "Ollama me respondió algo que no pude entender.".to_string()
+                    ClientError::Server(_) | ClientError::ClosedWithoutReply => {
+                        "Nala tuvo un error interno, revisá la consola.".to_string()
                     }
-                    AssistantError::Cancelled => "Cancelado.".to_string(),
-                    _ => "Tuve un error interno, revisá la consola.".to_string(),
                 };
                 let _ = speech.say(&spoken);
                 speech.flush();
