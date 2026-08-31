@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 agent-protocol = { path = "../../crates/agent-protocol" }
+hound = "3"
 serde_json = { workspace = true }
 stt = { path = "../../crates/stt" }
 thiserror = { workspace = true }
