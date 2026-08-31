@@ -3,6 +3,7 @@ pub mod dispatcher;
 pub mod execute_command;
 pub mod fetch_url;
 pub mod get_weather;
+pub mod list_apps;
 pub mod mcp_toolset;
 pub mod open_app;
 pub mod open_url;

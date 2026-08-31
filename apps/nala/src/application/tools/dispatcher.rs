@@ -4,9 +4,9 @@ use mcp::McpClient;
 use crate::{
     application::tools::{
         Tool, current_time::CurrentTimeTool, execute_command::ExecuteCommandTool,
-        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
-        open_app::OpenAppTool, open_url::OpenUrlTool, ping::PingTool, volume::VolumeTool,
-        web_search::WebSearchTool,
+        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, list_apps::ListAppsTool,
+        mcp_toolset::McpToolset, open_app::OpenAppTool, open_url::OpenUrlTool, ping::PingTool,
+        volume::VolumeTool, web_search::WebSearchTool,
     },
     ports::{
         computer::Computer,
@@ -92,6 +92,7 @@ pub enum Tools<
     OpenUrl(OpenUrlTool<C>),
     OpenApp(OpenAppTool<C>),
     Volume(VolumeTool<C>),
+    ListApps(ListAppsTool<C>),
     Ping(PingTool),
     CurrentTime(CurrentTimeTool<CL>),
     GetWeather(GetWeatherTool<H>),
@@ -218,6 +219,16 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcherPor
                         images: Vec::new(),
                         mutated: VolumeTool::<C>::MUTATING,
                     });
+                }
+                Tools::ListApps(tool) if tool_call.name == ListAppsTool::<C>::NAME => {
+                    ListAppsTool::<C>::parse_arguments(&tool_call.arguments).map_err(|error| {
+                        ToolDispatcherError::ToolErrorParsingArguments(Box::new(error))
+                    })?;
+
+                    return tool
+                        .execute(())
+                        .map(ToolOutcome::from)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
                 }
                 Tools::Ping(tool) if tool_call.name == PingTool::NAME => {
                     PingTool::parse_arguments(&tool_call.arguments).map_err(|error| {
