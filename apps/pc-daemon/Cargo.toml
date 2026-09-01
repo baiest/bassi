@@ -1,0 +1,14 @@
+[package]
+name = "pc-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "pc_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+device-capabilities = { path = "../../crates/device-capabilities" }
+device-protocol = { path = "../../crates/device-protocol" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
