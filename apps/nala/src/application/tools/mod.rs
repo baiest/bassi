@@ -1,4 +1,5 @@
 pub mod current_time;
+pub mod device_toolset;
 pub mod dispatcher;
 pub mod fetch_url;
 pub mod get_weather;

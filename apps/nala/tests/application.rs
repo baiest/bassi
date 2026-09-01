@@ -22,6 +22,12 @@ mod fake_http_fetcher;
 #[path = "common/fake_cancel.rs"]
 mod fake_cancel;
 
+#[path = "common/fake_device.rs"]
+mod fake_device;
+
+#[path = "application/tools/device_toolset.rs"]
+mod device_toolset;
+
 #[path = "application/tools/registry.rs"]
 mod registry;
 

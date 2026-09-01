@@ -6,14 +6,17 @@ use device_capabilities::capabilities::open_app::OpenAppTool;
 use device_capabilities::capabilities::open_url::OpenUrlTool;
 use device_capabilities::capabilities::volume::VolumeTool;
 use device_capabilities::ports::computer::Computer;
+use device_protocol::{CapabilityDefinition, Outcome};
 use mcp::McpClient;
 
 use crate::{
     application::tools::{
-        Tool, current_time::CurrentTimeTool, fetch_url::FetchUrlTool, get_weather::GetWeatherTool,
-        mcp_toolset::McpToolset, ping::PingTool, web_search::WebSearchTool,
+        Tool, current_time::CurrentTimeTool, device_toolset::DeviceToolset,
+        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
+        ping::PingTool, web_search::WebSearchTool,
     },
     ports::{
+        device::RemoteDevice,
         http::{HttpError, HttpFetcher},
         llm::ToolCall,
         tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOutcome},
@@ -81,16 +84,41 @@ impl HttpFetcher for NoHttpFetcher {
     }
 }
 
+/// A `RemoteDevice` that is never actually connected — the default for `R`
+/// so callers that don't use `Tools::Devices` (most tests, and any Nala
+/// with no devices attached) don't have to name a device type at all.
+#[derive(Debug, Default)]
+pub struct NoDevice;
+
+impl RemoteDevice for NoDevice {
+    fn name(&self) -> &str {
+        "no-device"
+    }
+
+    fn capabilities(&self) -> &[CapabilityDefinition] {
+        &[]
+    }
+
+    fn invoke(&mut self, _capability: &str, _arguments: &str) -> Outcome {
+        Outcome::Err {
+            code: device_protocol::ErrorCode::NotFound,
+            message: "NoDevice is never connected".to_string(),
+        }
+    }
+}
+
 /// One variant per `Tool` implementation the dispatcher knows how to run.
 /// Adding a native tool means adding a variant here and a match arm below —
 /// both checked exhaustively at compile time, no runtime type erasure. MCP
 /// tools all share one variant, since their identities are only known once
-/// connected to a server.
+/// connected to a server; devices work the same way, one `DeviceToolset`
+/// per connected device.
 pub enum Tools<
     C: Computer,
     CL: WallClock = NoWallClock,
     H: HttpFetcher = NoHttpFetcher,
     M: McpClient = NoMcpClient,
+    R: RemoteDevice = NoDevice,
 > {
     ExecuteCommand(ExecuteCommandTool<C>),
     OpenUrl(OpenUrlTool<C>),
@@ -106,6 +134,8 @@ pub enum Tools<
     // across servers is resolved by taking the first one that handles it —
     // see `dispatch` below.
     Mcp(Vec<McpToolset<M>>),
+    // Same pattern, one `DeviceToolset` per connected device.
+    Devices(Vec<DeviceToolset<R>>),
 }
 
 pub struct ToolDispatcher<
@@ -113,30 +143,33 @@ pub struct ToolDispatcher<
     CL: WallClock = NoWallClock,
     H: HttpFetcher = NoHttpFetcher,
     M: McpClient = NoMcpClient,
+    R: RemoteDevice = NoDevice,
 > {
-    tools: Vec<Tools<C, CL, H, M>>,
+    tools: Vec<Tools<C, CL, H, M, R>>,
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcher<C, CL, H, M> {
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice>
+    ToolDispatcher<C, CL, H, M, R>
+{
     pub fn new() -> Self {
         Self { tools: Vec::new() }
     }
 
-    pub fn register(&mut self, tool: Tools<C, CL, H, M>) {
+    pub fn register(&mut self, tool: Tools<C, CL, H, M, R>) {
         self.tools.push(tool);
     }
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> Default
-    for ToolDispatcher<C, CL, H, M>
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> Default
+    for ToolDispatcher<C, CL, H, M, R>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcherPort
-    for ToolDispatcher<C, CL, H, M>
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> ToolDispatcherPort
+    for ToolDispatcher<C, CL, H, M, R>
 {
     type Output = ToolOutcome;
     type Error = ToolDispatcherError;
@@ -305,6 +338,16 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient> ToolDispatcherPor
                         // applies to native tools that declare `MUTATING`.
                         mutated: false,
                     });
+                }
+                Tools::Devices(toolsets) => {
+                    let Some(toolset) = toolsets
+                        .iter_mut()
+                        .find(|toolset| toolset.handles(&tool_call.name))
+                    else {
+                        continue;
+                    };
+
+                    return Ok(toolset.call(&tool_call.name, &tool_call.arguments));
                 }
                 _ => continue,
             }
