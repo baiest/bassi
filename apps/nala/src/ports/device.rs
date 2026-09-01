@@ -1,4 +1,4 @@
-use device_protocol::{CapabilityDefinition, Outcome};
+use device_protocol::{CapabilityDefinition, DeviceState, Outcome};
 
 /// A device (e.g. the PC daemon) connected to Nala over the device
 /// protocol, from the agent loop's point of view. `invoke` is infallible —
@@ -16,4 +16,11 @@ pub trait RemoteDevice {
     fn capabilities(&self) -> &[CapabilityDefinition];
 
     fn invoke(&mut self, capability: &str, arguments: &str) -> Outcome;
+
+    /// Best-effort notification of Nala's own turn state, so a local
+    /// overlay can reflect the whole turn lifecycle (listening, thinking,
+    /// speaking) instead of only the moments this device's own capability
+    /// is running. Fire-and-forget: nothing waits on it, and a device that
+    /// dropped or never listens for it is not an error.
+    fn push_state(&self, state: DeviceState);
 }

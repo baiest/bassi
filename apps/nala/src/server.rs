@@ -12,6 +12,7 @@ use std::thread;
 use agent_protocol::{ClientMessage, Event, EventSink, ServerMessage};
 use tungstenite::{Message, WebSocket};
 
+use crate::adapters::devices::state_broadcast::DeviceStateBroadcaster;
 use crate::adapters::events::console::ConsoleEventSink;
 use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
@@ -98,14 +99,12 @@ impl<E: EventSink, W: Wire> EventSink for WsEventSink<E, W> {
 /// Runs one connection's session loop: read an `Input`, run it through the
 /// assistant (whose events stream out via `wire` as they happen), send back
 /// the `Reply`/`Error`, repeat until the client disconnects.
-pub fn run_session<L, D, E, W>(
-    mut assistant: Assistant<L, D, WsEventSink<E, W>>,
-    wire: Arc<Mutex<W>>,
-) where
+pub fn run_session<L, D, ES, W>(mut assistant: Assistant<L, D, ES>, wire: Arc<Mutex<W>>)
+where
     L: Llm + Send + 'static,
     D: ToolDispatcher<Output = ToolOutcome>,
     D::Error: std::error::Error + 'static,
-    E: EventSink,
+    ES: EventSink,
     W: Wire,
 {
     loop {
@@ -154,6 +153,7 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
 
     let wire = Arc::new(Mutex::new(ws));
     let events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
+    let events = DeviceStateBroadcaster::new(events, Arc::clone(&devices));
     let assistant = bootstrap::build_assistant(events, &devices);
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that

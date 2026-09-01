@@ -64,9 +64,12 @@ pub fn run_session<W: DeviceWire>(
             Some(NalaMessage::Ping { id }) => {
                 wire.send(&DeviceMessage::Pong { id })?;
             }
-            // Overlay state pushes from Nala arrive here in a later phase;
-            // this session loop has no overlay to forward them to yet.
-            Some(NalaMessage::State { .. }) => {}
+            // Nala's own turn state (listening/thinking/speaking), not
+            // tied to whether this device's own capability is running —
+            // forwarded as-is so the overlay reflects the whole turn.
+            Some(NalaMessage::State { state }) => {
+                overlay.set_state(state);
+            }
         }
     }
 }

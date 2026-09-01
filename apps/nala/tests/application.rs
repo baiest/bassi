@@ -23,6 +23,7 @@ mod fake_http_fetcher;
 mod fake_cancel;
 
 #[path = "common/fake_device.rs"]
+#[allow(dead_code)]
 mod fake_device;
 
 #[path = "application/tools/device_toolset.rs"]

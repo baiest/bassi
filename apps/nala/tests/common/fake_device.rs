@@ -1,15 +1,22 @@
-use device_protocol::{CapabilityDefinition, Outcome};
+use std::sync::{Arc, Mutex};
+
+use device_protocol::{CapabilityDefinition, DeviceState, Outcome};
 use nala::ports::device::RemoteDevice;
 
 /// A `RemoteDevice` whose capability list and `invoke` response are both
 /// scripted, and which records the last capability/arguments it was asked
-/// to invoke — enough to test `DeviceToolset` and the dispatcher's routing
-/// without a real connection.
+/// to invoke, and every `DeviceState` it was ever pushed — enough to test
+/// `DeviceToolset`, the dispatcher's routing, and state broadcasting
+/// without a real connection. `Clone`-able (state shared via `Arc`, like
+/// the real `WsDevice`) so it works with `DeviceRegistry`, which hands out
+/// clones rather than references.
+#[derive(Clone)]
 pub struct FakeDevice {
     name: String,
     capabilities: Vec<CapabilityDefinition>,
     outcome: Outcome,
     pub last_invoke: Option<(String, String)>,
+    pushed_states: Arc<Mutex<Vec<DeviceState>>>,
 }
 
 impl FakeDevice {
@@ -22,6 +29,7 @@ impl FakeDevice {
                 mutated: false,
             },
             last_invoke: None,
+            pushed_states: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -38,6 +46,10 @@ impl FakeDevice {
         self.outcome = outcome;
         self
     }
+
+    pub fn pushed_states(&self) -> Vec<DeviceState> {
+        self.pushed_states.lock().unwrap().clone()
+    }
 }
 
 impl RemoteDevice for FakeDevice {
@@ -52,5 +64,9 @@ impl RemoteDevice for FakeDevice {
     fn invoke(&mut self, capability: &str, arguments: &str) -> Outcome {
         self.last_invoke = Some((capability.to_string(), arguments.to_string()));
         self.outcome.clone()
+    }
+
+    fn push_state(&self, state: DeviceState) {
+        self.pushed_states.lock().unwrap().push(state);
     }
 }

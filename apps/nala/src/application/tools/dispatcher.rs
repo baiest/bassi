@@ -105,6 +105,8 @@ impl RemoteDevice for NoDevice {
             message: "NoDevice is never connected".to_string(),
         }
     }
+
+    fn push_state(&self, _state: device_protocol::DeviceState) {}
 }
 
 /// One variant per `Tool` implementation the dispatcher knows how to run.

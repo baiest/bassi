@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use device_protocol::{CapabilityDefinition, ErrorCode, NalaMessage, Outcome};
+use device_protocol::{CapabilityDefinition, DeviceState, ErrorCode, NalaMessage, Outcome};
 
 use crate::ports::device::RemoteDevice;
 
@@ -145,6 +145,13 @@ impl<S: DeviceSink> RemoteDevice for WsDevice<S> {
                 }
             }
         }
+    }
+
+    fn push_state(&self, state: DeviceState) {
+        // Best-effort: nothing waits on this, and a device that can't be
+        // reached right now will get the *next* state push anyway — no
+        // retry or error reporting needed for a fire-and-forget notice.
+        let _ = self.sink.send(&NalaMessage::State { state });
     }
 }
 

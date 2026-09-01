@@ -144,6 +144,27 @@ fn a_ping_is_answered_with_a_pong() {
 }
 
 #[test]
+fn a_state_push_from_nala_updates_the_overlay() {
+    let mut wire = FakeDeviceWire::new(vec![NalaMessage::State {
+        state: device_protocol::DeviceState::Speaking,
+    }]);
+    let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
+    let subscriber = overlay.subscribe();
+    assert_eq!(
+        subscriber.recv().unwrap(),
+        device_protocol::DeviceState::Idle
+    );
+
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
+
+    assert_eq!(
+        subscriber.recv().unwrap(),
+        device_protocol::DeviceState::Speaking
+    );
+}
+
+#[test]
 fn a_reject_ends_the_session_instead_of_retrying_forever() {
     let mut wire = FakeDeviceWire::new(vec![
         NalaMessage::Reject {
