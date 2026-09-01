@@ -20,6 +20,13 @@ use crate::device_server::Device;
 use crate::ports::llm::Llm;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
+/// Nala's own greeting — emitted as an `Event::Greeting` to every
+/// newly-connected turn client (see `handle_connection`), rather than left
+/// for each client to hardcode its own opening line. Going through the
+/// normal event pipe means it's logged by `ConsoleEventSink` the same as
+/// anything else Nala does, with no bespoke wire message of its own.
+const GREETING_TEXT: &str = "Hola, en que te puedo ayudar?";
+
 /// One connection's transport: receiving a client message and sending a
 /// server message. A trait (rather than using `tungstenite::WebSocket`
 /// directly) so `run_session` can be tested with an in-memory fake instead
@@ -153,7 +160,12 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
     };
 
     let wire = Arc::new(Mutex::new(ws));
-    let events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
+    let mut events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
+    // Emitted through the normal event pipe (not sent directly over `wire`)
+    // so it's logged by `ConsoleEventSink` the same as any other event.
+    events.emit(Event::Greeting {
+        text: GREETING_TEXT.to_string(),
+    });
     let assistant = bootstrap::build_assistant(events, &devices);
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that

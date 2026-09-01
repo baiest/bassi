@@ -86,6 +86,16 @@ fn spawn_fake_nala(turns: Vec<Vec<ServerMessage>>) -> String {
     thread::spawn(move || {
         let (stream, _) = listener.accept().expect("accept a connection from voice");
         let mut ws = tungstenite::accept(stream).expect("complete the WS handshake");
+
+        // Real Nala sends this once, right after connecting, before ever
+        // reading a ClientMessage — VoiceSession's reconnect path expects
+        // it first.
+        let greeting = serde_json::to_string(&ServerMessage::Event(Event::Greeting {
+            text: "hola".to_string(),
+        }))
+        .unwrap();
+        ws.send(Message::Text(greeting)).expect("send the greeting");
+
         let mut turns = turns.into_iter();
 
         loop {
@@ -166,8 +176,11 @@ fn transcribes_incoming_audio_and_sends_the_reply_as_audio() {
     });
 
     let mut client = connect_client(addr);
-    let clips = send_and_collect(&mut client, silence_wav(), 1);
-    assert_eq!(decode_clip_len(&clips[0]), "listo".len());
+    // The greeting clip ("hola") arrives first, synthesized when the
+    // session connects to Nala — before this turn's own reply.
+    let clips = send_and_collect(&mut client, silence_wav(), 2);
+    assert_eq!(decode_clip_len(&clips[0]), "hola".len());
+    assert_eq!(decode_clip_len(&clips[1]), "listo".len());
 
     client.close(None).ok();
     server.join().unwrap();
@@ -211,9 +224,10 @@ fn narration_audio_is_sent_before_the_reply_audio() {
     });
 
     let mut client = connect_client(addr);
-    let clips = send_and_collect(&mut client, silence_wav(), 2);
-    assert_eq!(decode_clip_len(&clips[0]), "un momento".len());
-    assert_eq!(decode_clip_len(&clips[1]), "listo".len());
+    let clips = send_and_collect(&mut client, silence_wav(), 3);
+    assert_eq!(decode_clip_len(&clips[0]), "hola".len());
+    assert_eq!(decode_clip_len(&clips[1]), "un momento".len());
+    assert_eq!(decode_clip_len(&clips[2]), "listo".len());
 
     client.close(None).ok();
     server.join().unwrap();
@@ -248,8 +262,9 @@ fn invalid_incoming_audio_is_skipped_without_ending_the_session() {
     client.send(Message::Binary(b"not a wav".to_vec())).unwrap();
     // Give the (silently skipped) bad frame a moment before the real one.
     thread::sleep(Duration::from_millis(50));
-    let clips = send_and_collect(&mut client, silence_wav(), 1);
-    assert_eq!(decode_clip_len(&clips[0]), "listo".len());
+    let clips = send_and_collect(&mut client, silence_wav(), 2);
+    assert_eq!(decode_clip_len(&clips[0]), "hola".len());
+    assert_eq!(decode_clip_len(&clips[1]), "listo".len());
 
     client.close(None).ok();
     server.join().unwrap();

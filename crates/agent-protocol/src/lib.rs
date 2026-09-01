@@ -205,6 +205,13 @@ pub enum Event {
     AnsweredUnverified {
         task_id: TaskId,
     },
+
+    /// Sent once, right when a client connects — before any turn — so Nala
+    /// is the one greeting, not each client deciding its own opening line.
+    /// Not tied to a task: no `task_id`.
+    Greeting {
+        text: String,
+    },
 }
 
 /// Which eviction step fired in a `BudgetPressure` event, in the order the
@@ -273,6 +280,23 @@ mod tests {
         let decoded: ClientMessage = serde_json::from_str(&json).unwrap();
 
         assert!(matches!(decoded, ClientMessage::Cancel));
+    }
+
+    #[test]
+    fn a_greeting_event_round_trips_through_json_wrapped_in_a_server_message() {
+        let message = ServerMessage::Event(Event::Greeting {
+            text: "Hola, en que te puedo ayudar?".to_string(),
+        });
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            ServerMessage::Event(Event::Greeting { text }) => {
+                assert_eq!(text, "Hola, en que te puedo ayudar?")
+            }
+            _ => panic!("expected Event(Greeting)"),
+        }
     }
 
     #[test]
