@@ -6,6 +6,7 @@ members = [
     "crates/device-protocol",
     "crates/device-capabilities",
     "apps/pc-daemon",
+    "apps/nala-overlay",
     "crates/mcp",
     "crates/tts",
     "crates/stt",
