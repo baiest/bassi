@@ -1,4 +1,13 @@
+// Hides the console window on Windows, so the daemon runs in the
+// background instead of leaving a terminal open — required for it to
+// survive the user closing that terminal, and for autostart to not pop one
+// up at login. `println!`/`eprintln!` still compile but have nowhere to
+// go once there's no console; proper logging is future work, not needed
+// for this vertical slice.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::env;
+use std::sync::Arc;
 use std::thread;
 
 use device_capabilities::adapters::computer::windows::Windows;
@@ -13,12 +22,17 @@ use device_capabilities::registry::CapabilityRegistry;
 use pc_daemon::client::TcpDeviceWire;
 use pc_daemon::config::DeviceIdentity;
 use pc_daemon::daemon::{SessionOutcome, run_session};
+use pc_daemon::overlay_channel::{self, OverlayChannel};
 use pc_daemon::reconnect::{Backoff, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY};
 
 /// Loopback-only by default, matching `nala`'s own `DEFAULT_ADDR` in
 /// `main.rs`: exposing this to the LAN is an explicit opt-in, not the
 /// default, since a connected daemon can run `execute_command`.
 const DEFAULT_ADDR: &str = "127.0.0.1:4182";
+
+/// Loopback-only, and not overridable — the overlay channel has no auth of
+/// its own, so it must never leave the machine.
+const OVERLAY_ADDR: &str = "127.0.0.1:4183";
 
 /// `execute_command` is left out of the default allowlist deliberately —
 /// it's arbitrary command execution, and should be opted into via
@@ -58,6 +72,14 @@ fn main() {
         token: env::var("NALA_DEVICE_TOKEN").unwrap_or_default(),
     };
 
+    let overlay = Arc::new(OverlayChannel::new());
+    let overlay_for_server = Arc::clone(&overlay);
+    thread::spawn(move || {
+        if let Err(error) = overlay_channel::serve(OVERLAY_ADDR, overlay_for_server) {
+            eprintln!("Warning: could not start the overlay channel on {OVERLAY_ADDR}: {error}");
+        }
+    });
+
     let mut backoff = Backoff::new(RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY);
 
     loop {
@@ -67,7 +89,7 @@ fn main() {
                 println!("Connected to nala at {addr}.");
 
                 let mut registry = build_registry();
-                match run_session(&mut wire, &mut registry, &identity) {
+                match run_session(&mut wire, &mut registry, &identity, &overlay) {
                     Ok(SessionOutcome::Closed) => {
                         eprintln!("Connection to nala at {addr} closed; reconnecting.");
                     }
