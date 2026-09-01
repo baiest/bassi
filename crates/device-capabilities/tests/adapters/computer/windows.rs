@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use nala::adapters::computer::windows::Windows;
-use nala::ports::computer::Computer;
+use device_capabilities::adapters::computer::windows::Windows;
+use device_capabilities::ports::computer::Computer;
 
 use crate::fake_environment::FakeEnvironment;
 use crate::fake_process::FakeProcess;

@@ -1,15 +1,19 @@
 use chrono::{DateTime, Local};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
+use device_capabilities::capabilities::list_apps::ListAppsTool;
+use device_capabilities::capabilities::open_app::OpenAppTool;
+use device_capabilities::capabilities::open_url::OpenUrlTool;
+use device_capabilities::capabilities::volume::VolumeTool;
+use device_capabilities::ports::computer::Computer;
 use mcp::McpClient;
 
 use crate::{
     application::tools::{
-        Tool, current_time::CurrentTimeTool, execute_command::ExecuteCommandTool,
-        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, list_apps::ListAppsTool,
-        mcp_toolset::McpToolset, open_app::OpenAppTool, open_url::OpenUrlTool, ping::PingTool,
-        volume::VolumeTool, web_search::WebSearchTool,
+        Tool, current_time::CurrentTimeTool, fetch_url::FetchUrlTool, get_weather::GetWeatherTool,
+        mcp_toolset::McpToolset, ping::PingTool, web_search::WebSearchTool,
     },
     ports::{
-        computer::Computer,
         http::{HttpError, HttpFetcher},
         llm::ToolCall,
         tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOutcome},

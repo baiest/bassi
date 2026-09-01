@@ -1,6 +1,6 @@
 use crate::fake_computer::FakeComputer;
-use nala::application::tools::Tool;
-use nala::application::tools::list_apps::{ListAppsTool, parse_start_apps};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::list_apps::{ListAppsTool, parse_start_apps};
 
 #[test]
 fn parses_a_json_array_sorting_and_deduping_names() {

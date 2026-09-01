@@ -1,3 +1,5 @@
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
 use nala::{
     adapters::events::console::ConsoleEventSink,
     adapters::metrics::csv_sink::CsvMetricsSink,
@@ -8,7 +10,6 @@ use nala::{
         tools::{
             Tool,
             dispatcher::{NoHttpFetcher, NoWallClock, ToolDispatcher, Tools},
-            execute_command::ExecuteCommandTool,
             mcp_toolset::McpToolset,
             ping::PingTool,
             registry::ToolRegistry,
@@ -39,7 +40,7 @@ use mcp::McpToolResult;
 
 fn registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    registry.register(ExecuteCommandTool::<FakeComputer>::definition());
+    registry.register(ExecuteCommandTool::<FakeComputer>::definition().into());
     registry
 }
 

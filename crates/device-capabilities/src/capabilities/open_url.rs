@@ -3,7 +3,7 @@ use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::application::tools::{Tool, ToolDefinition};
+use crate::capability::Capability;
 use crate::ports::computer::{Computer, ComputerError};
 
 /// `start` doesn't block — it hands off to the OS and returns almost
@@ -59,7 +59,7 @@ fn validate_url(url: &str) -> Result<(), OpenUrlError> {
     Ok(())
 }
 
-impl<C: Computer> Tool for OpenUrlTool<C> {
+impl<C: Computer> Capability for OpenUrlTool<C> {
     type Args = OpenUrlArgs;
     type Output = String;
     type Error = OpenUrlError;
@@ -86,14 +86,6 @@ impl<C: Computer> Tool for OpenUrlTool<C> {
         serde_json::from_str(args).map_err(|error| {
             OpenUrlError::InvalidUrl(format!("could not parse arguments: {error}"))
         })
-    }
-
-    fn definition() -> ToolDefinition {
-        ToolDefinition {
-            name: Self::NAME.to_string(),
-            description: Self::DESCRIPTION.to_string(),
-            parameters: Self::parameters(),
-        }
     }
 
     fn context(&mut self) -> Result<String, Self::Error> {

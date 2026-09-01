@@ -413,6 +413,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-capabilities"
+version = "0.1.0"
+dependencies = [
+ "device-protocol",
+ "process-group",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "device-protocol"
 version = "0.1.0"
 dependencies = [
@@ -1207,6 +1219,8 @@ dependencies = [
  "agent-protocol",
  "chrono",
  "csv",
+ "device-capabilities",
+ "device-protocol",
  "mcp",
  "process-group",
  "reedline",

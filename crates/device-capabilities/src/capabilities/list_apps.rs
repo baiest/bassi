@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::application::tools::{Tool, ToolDefinition};
+use crate::capability::Capability;
 use crate::ports::computer::{Computer, ComputerError};
 
 /// PowerShell startup makes this slower than a plain `start` command, so it
@@ -96,7 +96,7 @@ impl<C: Computer> ListAppsTool<C> {
     }
 }
 
-impl<C: Computer> Tool for ListAppsTool<C> {
+impl<C: Computer> Capability for ListAppsTool<C> {
     type Args = ();
     type Output = String;
     type Error = ListAppsError;
@@ -120,14 +120,6 @@ impl<C: Computer> Tool for ListAppsTool<C> {
 
     fn parse_arguments(_arguments: &str) -> Result<Self::Args, Self::Error> {
         Ok(())
-    }
-
-    fn definition() -> ToolDefinition {
-        ToolDefinition {
-            name: Self::NAME.to_string(),
-            description: Self::DESCRIPTION.to_string(),
-            parameters: Self::parameters(),
-        }
     }
 
     fn context(&mut self) -> Result<String, Self::Error> {

@@ -1,6 +1,6 @@
 use crate::fake_computer::FakeComputer;
-use nala::application::tools::Tool;
-use nala::application::tools::volume::{VolumeArgs, VolumeTool};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::volume::{VolumeArgs, VolumeTool};
 use schemars::schema_for;
 
 #[test]

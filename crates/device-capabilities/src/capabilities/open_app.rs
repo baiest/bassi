@@ -3,7 +3,7 @@ use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::application::tools::{Tool, ToolDefinition};
+use crate::capability::Capability;
 use crate::ports::computer::{Computer, ComputerError};
 
 /// `start` doesn't block — it hands off to the OS and returns almost
@@ -59,7 +59,7 @@ fn validate_app(app: &str) -> Result<(), OpenAppError> {
     Ok(())
 }
 
-impl<C: Computer> Tool for OpenAppTool<C> {
+impl<C: Computer> Capability for OpenAppTool<C> {
     type Args = OpenAppArgs;
     type Output = String;
     type Error = OpenAppError;
@@ -86,14 +86,6 @@ impl<C: Computer> Tool for OpenAppTool<C> {
         serde_json::from_str(args).map_err(|error| {
             OpenAppError::InvalidArgument(format!("could not parse arguments: {error}"))
         })
-    }
-
-    fn definition() -> ToolDefinition {
-        ToolDefinition {
-            name: Self::NAME.to_string(),
-            description: Self::DESCRIPTION.to_string(),
-            parameters: Self::parameters(),
-        }
     }
 
     fn context(&mut self) -> Result<String, Self::Error> {

@@ -22,21 +22,6 @@ mod fake_http_fetcher;
 #[path = "common/fake_cancel.rs"]
 mod fake_cancel;
 
-#[path = "application/tools/execute_command.rs"]
-mod execute_command;
-
-#[path = "application/tools/open_url.rs"]
-mod open_url;
-
-#[path = "application/tools/open_app.rs"]
-mod open_app;
-
-#[path = "application/tools/volume.rs"]
-mod volume;
-
-#[path = "application/tools/list_apps.rs"]
-mod list_apps;
-
 #[path = "application/tools/registry.rs"]
 mod registry;
 

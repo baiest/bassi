@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nala::ports::environment::{Environment, EnvironmentError};
+use device_capabilities::ports::environment::{Environment, EnvironmentError};
 
 pub struct FakeEnvironment {
     pub vars: HashMap<String, String>,

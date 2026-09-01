@@ -1,6 +1,6 @@
 use crate::fake_computer::FakeComputer;
-use nala::application::tools::Tool;
-use nala::application::tools::open_url::{OpenUrlArgs, OpenUrlTool};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::open_url::{OpenUrlArgs, OpenUrlTool};
 use schemars::schema_for;
 
 #[test]

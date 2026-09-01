@@ -6,31 +6,32 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use device_capabilities::Capability;
+use device_capabilities::adapters::computer::windows::Windows;
+use device_capabilities::adapters::environment::system::SystemEnvironment;
+use device_capabilities::adapters::process::windows::Windows as WindowsProcess;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
+use device_capabilities::capabilities::list_apps::ListAppsTool;
+use device_capabilities::capabilities::open_app::OpenAppTool;
+use device_capabilities::capabilities::open_url::OpenUrlTool;
+use device_capabilities::capabilities::volume::VolumeTool;
 use mcp::{ChildTransport, StdioMcpClient};
 use serde::Deserialize;
 
 #[cfg(windows)]
 use crate::adapters::cancellation::console::CtrlCCancelSignal;
-use crate::adapters::computer::windows::Windows;
-use crate::adapters::environment::system::SystemEnvironment;
 use crate::adapters::http::reqwest::ReqwestFetcher;
 use crate::adapters::llm::ollama::OllamaLlm;
-use crate::adapters::process::windows::Windows as WindowsProcess;
 use crate::adapters::wall_clock::system::SystemWallClock;
 use crate::application::assistant::Assistant;
 use crate::application::tools::Tool;
 use crate::application::tools::current_time::CurrentTimeTool;
 use crate::application::tools::dispatcher::{ToolDispatcher, Tools};
-use crate::application::tools::execute_command::ExecuteCommandTool;
 use crate::application::tools::fetch_url::FetchUrlTool;
 use crate::application::tools::get_weather::GetWeatherTool;
-use crate::application::tools::list_apps::ListAppsTool;
 use crate::application::tools::mcp_toolset::McpToolset;
-use crate::application::tools::open_app::OpenAppTool;
-use crate::application::tools::open_url::OpenUrlTool;
 use crate::application::tools::ping::PingTool;
 use crate::application::tools::registry::ToolRegistry;
-use crate::application::tools::volume::VolumeTool;
 use crate::application::tools::web_search::WebSearchTool;
 use crate::ports::events::EventSink;
 #[cfg(windows)]
@@ -74,11 +75,11 @@ pub fn build_assistant<E: EventSink>(events: E) -> Assistant<OllamaLlm, Dispatch
     let list_apps_computer = Windows::new(WindowsProcess::new(), SystemEnvironment::new());
 
     let mut registry = ToolRegistry::new();
-    registry.register(ExecuteCommandTool::<ComputerType>::definition());
-    registry.register(OpenUrlTool::<ComputerType>::definition());
-    registry.register(OpenAppTool::<ComputerType>::definition());
-    registry.register(VolumeTool::<ComputerType>::definition());
-    registry.register(ListAppsTool::<ComputerType>::definition());
+    registry.register(ExecuteCommandTool::<ComputerType>::definition().into());
+    registry.register(OpenUrlTool::<ComputerType>::definition().into());
+    registry.register(OpenAppTool::<ComputerType>::definition().into());
+    registry.register(VolumeTool::<ComputerType>::definition().into());
+    registry.register(ListAppsTool::<ComputerType>::definition().into());
     registry.register(PingTool::definition());
     registry.register(CurrentTimeTool::<SystemWallClock>::definition());
     registry.register(GetWeatherTool::<ReqwestFetcher>::definition());
