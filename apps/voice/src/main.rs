@@ -11,18 +11,24 @@ const DEFAULT_VOICE_ADDR: &str = "127.0.0.1:4181";
 const DEFAULT_NALA_ADDR: &str = "127.0.0.1:4180";
 
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some("--serve") {
-        let voice_addr =
-            std::env::var("NALA_VOICE_ADDR").unwrap_or_else(|_| DEFAULT_VOICE_ADDR.to_string());
-        let nala_addr =
-            std::env::var("NALA_ADDR").unwrap_or_else(|_| DEFAULT_NALA_ADDR.to_string());
-        if let Err(error) = voice::audio_server::serve(&voice_addr, &nala_addr) {
-            eprintln!("Error: could not start the server on {voice_addr}: {error}");
-            std::process::exit(1);
-        }
+    // `--serve` is the default now (voice normally runs unattended,
+    // serving PC/Android clients over the network) — `--local` opts into
+    // the old interactive mic/speaker REPL for local dev/debugging.
+    if std::env::args().nth(1).as_deref() == Some("--local") {
+        run_local();
         return;
     }
 
+    let voice_addr =
+        std::env::var("NALA_VOICE_ADDR").unwrap_or_else(|_| DEFAULT_VOICE_ADDR.to_string());
+    let nala_addr = std::env::var("NALA_ADDR").unwrap_or_else(|_| DEFAULT_NALA_ADDR.to_string());
+    if let Err(error) = voice::audio_server::serve(&voice_addr, &nala_addr) {
+        eprintln!("Error: could not start the server on {voice_addr}: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run_local() {
     let (mut client, mut events, speech, _chatterbox_supervisor) = match bootstrap::build() {
         Ok(built) => built,
         Err(error) => {
