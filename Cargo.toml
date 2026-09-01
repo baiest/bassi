@@ -3,6 +3,7 @@ members = [
     "apps/nala",
     "apps/voice",
     "crates/agent-protocol",
+    "crates/device-protocol",
     "crates/mcp",
     "crates/tts",
     "crates/stt",
