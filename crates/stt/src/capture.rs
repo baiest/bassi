@@ -78,6 +78,71 @@ pub fn record_until_enter() -> Result<RecordedAudio, CaptureError> {
     })
 }
 
+/// Records from the default input device for as long as `should_continue`
+/// keeps returning `true` (polled every ~10ms) — a press-and-hold trigger
+/// rather than `record_until_enter`'s Enter-key one, for a caller with its
+/// own UI gesture (e.g. holding down a button). `on_amplitude` is called
+/// with each newly-captured chunk's samples as they arrive, so a caller
+/// can drive a live level meter while recording — same buffer the final
+/// `RecordedAudio` is built from, just observed incrementally.
+pub fn record_while(
+    mut should_continue: impl FnMut() -> bool,
+    mut on_amplitude: impl FnMut(&[f32]),
+) -> Result<RecordedAudio, CaptureError> {
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or(CaptureError::NoInputDevice)?;
+
+    let config = device
+        .default_input_config()
+        .map_err(|e| CaptureError::StreamBuild(e.to_string()))?;
+
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels() as usize;
+    let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let buffer_writer = Arc::clone(&buffer);
+
+    let stream = device
+        .build_input_stream(
+            &config.into(),
+            move |data: &[f32], _| {
+                let mut buffer = buffer_writer.lock().unwrap();
+                for frame in data.chunks(channels) {
+                    let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
+                    buffer.push(mono);
+                }
+            },
+            |err| eprintln!("Audio input error: {err}"),
+            None,
+        )
+        .map_err(|e| CaptureError::StreamBuild(e.to_string()))?;
+
+    stream
+        .play()
+        .map_err(|e| CaptureError::StreamStart(e.to_string()))?;
+
+    let mut last_reported_len = 0;
+    while should_continue() {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let buffer = buffer.lock().unwrap();
+        if buffer.len() > last_reported_len {
+            on_amplitude(&buffer[last_reported_len..]);
+            last_reported_len = buffer.len();
+        }
+    }
+
+    drop(stream);
+
+    let raw_samples = buffer.lock().unwrap().clone();
+    let resampled = resample_linear(&raw_samples, sample_rate, WHISPER_SAMPLE_RATE);
+
+    Ok(RecordedAudio {
+        samples: resampled,
+        sample_rate: WHISPER_SAMPLE_RATE,
+    })
+}
+
 /// Linear resampling — not studio quality, but whisper.cpp already
 /// tolerates plenty of noise/artifacts, so it's more than good enough for
 /// STT and keeps this crate free of a heavier resampling dependency.

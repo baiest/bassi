@@ -11,7 +11,9 @@ mod transcribe;
 mod vad;
 mod wake;
 
-pub use capture::{CaptureError, RecordedAudio, WHISPER_SAMPLE_RATE, record_until_enter};
+pub use capture::{
+    CaptureError, RecordedAudio, WHISPER_SAMPLE_RATE, record_until_enter, record_while,
+};
 pub use listener::{ListenError, Listener, ListenerConfig, ListenerStatus};
 pub use resample::Resampler;
 pub use ring::Ring;
