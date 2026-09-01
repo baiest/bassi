@@ -12,3 +12,4 @@ device-capabilities = { path = "../../crates/device-capabilities" }
 device-protocol = { path = "../../crates/device-protocol" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tungstenite = { workspace = true }
