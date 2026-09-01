@@ -104,6 +104,12 @@ pub enum NalaMessage {
     State {
         state: DeviceState,
     },
+    /// Sent once, right after `Welcome`, so a newly-connected device speaks
+    /// Nala's greeting itself instead of a voice client doing it — a device
+    /// with no audio output (or no overlay) is free to ignore it.
+    Greeting {
+        text: String,
+    },
 }
 
 #[cfg(test)]
@@ -218,6 +224,18 @@ mod tests {
             } => assert_eq!(protocol_version, 9999),
             _ => panic!("expected Hello"),
         }
+    }
+
+    #[test]
+    fn a_greeting_round_trips_through_json() {
+        let message = NalaMessage::Greeting {
+            text: "Hola, en que te puedo ayudar?".to_string(),
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: NalaMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, message);
     }
 
     #[test]

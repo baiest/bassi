@@ -33,11 +33,6 @@ fn main() {
 
     let transcriber = bootstrap::build_transcriber();
 
-    let greeting = "Hola, en que te puedo ayudar?";
-    println!("{greeting}");
-    let _ = speech.say(greeting);
-    speech.flush();
-
     loop {
         println!("Apretá Enter para hablar (o escribí 'salir' para terminar)...");
         let mut trigger = String::new();

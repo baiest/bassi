@@ -2545,6 +2545,7 @@ dependencies = [
  "device-protocol",
  "serde_json",
  "thiserror 2.0.20",
+ "tts",
  "tungstenite",
 ]
 

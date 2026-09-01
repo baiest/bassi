@@ -24,6 +24,7 @@ use pc_daemon::config::DeviceIdentity;
 use pc_daemon::daemon::{SessionOutcome, run_session};
 use pc_daemon::overlay_channel::{self, OverlayChannel};
 use pc_daemon::reconnect::{Backoff, RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY};
+use tts::WindowsSapiSpeech;
 
 /// Loopback-only by default, matching `nala`'s own `DEFAULT_ADDR` in
 /// `main.rs`: exposing this to the LAN is an explicit opt-in, not the
@@ -80,6 +81,7 @@ fn main() {
         }
     });
 
+    let speech = WindowsSapiSpeech::new();
     let mut backoff = Backoff::new(RECONNECT_INITIAL_DELAY, RECONNECT_MAX_DELAY);
 
     loop {
@@ -89,7 +91,7 @@ fn main() {
                 println!("Connected to nala at {addr}.");
 
                 let mut registry = build_registry();
-                match run_session(&mut wire, &mut registry, &identity, &overlay) {
+                match run_session(&mut wire, &mut registry, &identity, &overlay, &speech) {
                     Ok(SessionOutcome::Closed) => {
                         eprintln!("Connection to nala at {addr} closed; reconnecting.");
                     }

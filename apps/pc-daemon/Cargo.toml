@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 device-capabilities = { path = "../../crates/device-capabilities" }
 device-protocol = { path = "../../crates/device-protocol" }
+tts = { path = "../../crates/tts" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tungstenite = { workspace = true }
