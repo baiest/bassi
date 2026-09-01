@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-device-protocol = { path = "../../crates/device-protocol" }
 egui = "0.28"
-serde_json = { workspace = true }
+hound = "3"
+thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.28", default-features = false, features = [
     "default_fonts",
     "wgpu",
 ] }
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
+stt = { path = "../../crates/stt" }
 tungstenite = { workspace = true }
+voice = { path = "../voice" }

@@ -59,7 +59,12 @@ fi
 # built on top of it (session.rs, ring.rs, resample.rs, wake.rs) is pure
 # or generic over a trait and stays fully measured. stream.rs needs a
 # real microphone/input device, same reason as adapters/process/windows.rs.
-IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|crates[/\\]stt[/\\]src[/\\](capture|transcribe|vad|stream)\.rs$|cli[/\\]prompt\.rs$'
+# apps/nala-overlay's overlay.rs and playback.rs are excluded for the same
+# reason as capture.rs/stream.rs above: past the pure steps they call into
+# (amplitude.rs, clip.rs, color.rs, voice_client.rs — all still fully
+# measured), the rest is a real audio input/output device and an on-screen
+# eframe window, neither available in CI.
+IGNORE_REGEX='(main|bootstrap)\.rs$|adapters[/\\]process[/\\]windows\.rs$|crates[/\\]mcp[/\\]src[/\\]child_process\.rs$|crates[/\\]tts[/\\]src[/\\](chatterbox[/\\]supervisor|piper[/\\]speech|backend)\.rs$|crates[/\\]stt[/\\]src[/\\](capture|transcribe|vad|stream)\.rs$|cli[/\\]prompt\.rs$|nala-overlay[/\\]src[/\\](overlay|playback)\.rs$'
 echo -e "${BLUE}Running tests with coverage instrumentation...${NC}"
 cargo llvm-cov --workspace --all-features --ignore-filename-regex "$IGNORE_REGEX" --lcov --output-path lcov.info
 
