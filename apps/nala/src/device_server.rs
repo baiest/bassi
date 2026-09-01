@@ -29,11 +29,6 @@ const READ_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// on its own side too.
 const HEARTBEAT_INTERVAL_MS: u64 = 20_000;
 
-/// Sent as `Greeting` right after `Welcome` — Nala's own greeting, spoken by
-/// the device (not a voice client), so any connected device with audio
-/// output/overlay reacts to it the same way it reacts to any other turn.
-const GREETING_TEXT: &str = "Hola, en que te puedo ayudar?";
-
 /// What one poll of the connection produced. Mirrors
 /// `voice::audio_server::WireEvent`: a timed-out read (`Idle`) is not an
 /// error, just "nothing yet, keep polling."
@@ -154,13 +149,6 @@ fn handle_connection(
     {
         return;
     }
-
-    // Best-effort: a device that doesn't care about the greeting (no audio
-    // output, no overlay) just ignores it — never worth tearing the
-    // connection down over.
-    let _ = wire.lock().unwrap().send_message(&NalaMessage::Greeting {
-        text: GREETING_TEXT.to_string(),
-    });
 
     let device = WsDevice::new(name, capabilities, Arc::clone(&wire));
     registry.register(device_id.clone(), device.clone());

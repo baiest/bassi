@@ -5,9 +5,6 @@
 #[path = "common/fake_computer.rs"]
 mod fake_computer;
 
-#[path = "common/fake_speech.rs"]
-mod fake_speech;
-
 use std::net::TcpListener;
 use std::thread;
 
@@ -15,7 +12,6 @@ use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
 use device_capabilities::registry::CapabilityRegistry;
 use device_protocol::{DeviceMessage, NalaMessage, Outcome};
 use fake_computer::FakeComputer;
-use fake_speech::FakeSpeech;
 use pc_daemon::client::TcpDeviceWire;
 use pc_daemon::config::DeviceIdentity;
 use pc_daemon::daemon::{SessionOutcome, run_session};
@@ -76,8 +72,7 @@ fn a_daemon_can_complete_one_invoke_over_a_real_socket() {
     };
 
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
-    let outcome = run_session(&mut wire, &mut registry, &identity, &overlay, &speech)
+    let outcome = run_session(&mut wire, &mut registry, &identity, &overlay)
         .expect("session should not error");
     assert!(matches!(outcome, SessionOutcome::Closed));
 

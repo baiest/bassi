@@ -6,7 +6,6 @@ use pc_daemon::daemon::{SessionOutcome, run_session};
 use pc_daemon::overlay_channel::OverlayChannel;
 
 use crate::fake_computer::FakeComputer;
-use crate::fake_speech::FakeSpeech;
 use crate::fake_wire::FakeDeviceWire;
 
 fn identity() -> DeviceIdentity {
@@ -29,10 +28,8 @@ fn the_daemon_announces_its_capabilities_in_its_hello() {
     let mut wire = FakeDeviceWire::new(vec![]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[0] {
         DeviceMessage::Hello { capabilities, .. } => {
@@ -52,10 +49,8 @@ fn an_invoke_runs_the_capability_and_returns_a_result_with_the_same_request_id()
     }]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result {
@@ -85,10 +80,8 @@ fn a_failing_capability_returns_an_error_result_instead_of_dropping_the_connecti
     ]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result { outcome, .. } => {
@@ -119,10 +112,8 @@ fn an_unknown_capability_returns_not_found() {
     }]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result { outcome, .. } => {
@@ -143,10 +134,8 @@ fn a_ping_is_answered_with_a_pong() {
     let mut wire = FakeDeviceWire::new(vec![NalaMessage::Ping { id: 7 }]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Pong { id } => assert_eq!(*id, 7),
@@ -161,15 +150,13 @@ fn a_state_push_from_nala_updates_the_overlay() {
     }]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
     let subscriber = overlay.subscribe();
     assert_eq!(
         subscriber.recv().unwrap(),
         device_protocol::DeviceState::Idle
     );
 
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     assert_eq!(
         subscriber.recv().unwrap(),
@@ -188,10 +175,9 @@ fn a_reject_ends_the_session_instead_of_retrying_forever() {
     ]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    let outcome = run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("should not error");
+    let outcome =
+        run_session(&mut wire, &mut registry, &identity(), &overlay).expect("should not error");
 
     assert!(matches!(
         outcome,
@@ -207,41 +193,9 @@ fn the_session_loop_ends_when_the_connection_closes() {
     let mut wire = FakeDeviceWire::new(vec![]);
     let mut registry = registry_with_execute_command();
     let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
 
-    let outcome = run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("should not error");
+    let outcome =
+        run_session(&mut wire, &mut registry, &identity(), &overlay).expect("should not error");
 
     assert!(matches!(outcome, SessionOutcome::Closed));
-}
-
-#[test]
-fn a_greeting_from_nala_is_spoken_and_reflected_on_the_overlay() {
-    let mut wire = FakeDeviceWire::new(vec![NalaMessage::Greeting {
-        text: "Hola, en que te puedo ayudar?".to_string(),
-    }]);
-    let mut registry = registry_with_execute_command();
-    let overlay = OverlayChannel::new();
-    let speech = FakeSpeech::new();
-    let subscriber = overlay.subscribe();
-    assert_eq!(
-        subscriber.recv().unwrap(),
-        device_protocol::DeviceState::Idle
-    );
-
-    run_session(&mut wire, &mut registry, &identity(), &overlay, &speech)
-        .expect("session should not error");
-
-    assert_eq!(
-        speech.said.lock().unwrap().as_slice(),
-        &["Hola, en que te puedo ayudar?".to_string()]
-    );
-    assert_eq!(
-        subscriber.recv().unwrap(),
-        device_protocol::DeviceState::Speaking
-    );
-    assert_eq!(
-        subscriber.recv().unwrap(),
-        device_protocol::DeviceState::Idle
-    );
 }

@@ -2,7 +2,6 @@ use device_capabilities::registry::CapabilityRegistry;
 use device_protocol::{
     DeviceMessage, DeviceState, NalaMessage, Outcome, PROTOCOL_VERSION, RejectReason,
 };
-use tts::Speech;
 
 use crate::client::{DaemonError, DeviceWire};
 use crate::config::DeviceIdentity;
@@ -30,7 +29,6 @@ pub fn run_session<W: DeviceWire>(
     registry: &mut CapabilityRegistry,
     identity: &DeviceIdentity,
     overlay: &OverlayChannel,
-    speech: &dyn Speech,
 ) -> Result<SessionOutcome, DaemonError> {
     wire.send(&DeviceMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
@@ -71,14 +69,6 @@ pub fn run_session<W: DeviceWire>(
             // forwarded as-is so the overlay reflects the whole turn.
             Some(NalaMessage::State { state }) => {
                 overlay.set_state(state);
-            }
-            // Nala's own greeting, spoken by this device rather than a
-            // voice client — a device with no audio output still gets the
-            // overlay transitions, so the reaction is visible either way.
-            Some(NalaMessage::Greeting { text }) => {
-                overlay.set_state(DeviceState::Speaking);
-                let _ = speech.say(&text);
-                overlay.set_state(DeviceState::Idle);
             }
         }
     }
