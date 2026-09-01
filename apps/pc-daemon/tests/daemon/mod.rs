@@ -3,6 +3,7 @@ use device_capabilities::registry::CapabilityRegistry;
 use device_protocol::{DeviceMessage, ErrorCode, NalaMessage, Outcome, RejectReason};
 use pc_daemon::config::DeviceIdentity;
 use pc_daemon::daemon::{SessionOutcome, run_session};
+use pc_daemon::overlay_channel::OverlayChannel;
 
 use crate::fake_computer::FakeComputer;
 use crate::fake_wire::FakeDeviceWire;
@@ -26,8 +27,9 @@ fn registry_with_execute_command() -> CapabilityRegistry {
 fn the_daemon_announces_its_capabilities_in_its_hello() {
     let mut wire = FakeDeviceWire::new(vec![]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    run_session(&mut wire, &mut registry, &identity()).expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[0] {
         DeviceMessage::Hello { capabilities, .. } => {
@@ -46,8 +48,9 @@ fn an_invoke_runs_the_capability_and_returns_a_result_with_the_same_request_id()
         arguments: r#"{"command":"start chrome"}"#.to_string(),
     }]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    run_session(&mut wire, &mut registry, &identity()).expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result {
@@ -76,8 +79,9 @@ fn a_failing_capability_returns_an_error_result_instead_of_dropping_the_connecti
         },
     ]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    run_session(&mut wire, &mut registry, &identity()).expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result { outcome, .. } => {
@@ -107,8 +111,9 @@ fn an_unknown_capability_returns_not_found() {
         arguments: "{}".to_string(),
     }]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    run_session(&mut wire, &mut registry, &identity()).expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Result { outcome, .. } => {
@@ -128,8 +133,9 @@ fn an_unknown_capability_returns_not_found() {
 fn a_ping_is_answered_with_a_pong() {
     let mut wire = FakeDeviceWire::new(vec![NalaMessage::Ping { id: 7 }]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    run_session(&mut wire, &mut registry, &identity()).expect("session should not error");
+    run_session(&mut wire, &mut registry, &identity(), &overlay).expect("session should not error");
 
     match &wire.sent[1] {
         DeviceMessage::Pong { id } => assert_eq!(*id, 7),
@@ -147,8 +153,10 @@ fn a_reject_ends_the_session_instead_of_retrying_forever() {
         NalaMessage::Ping { id: 1 },
     ]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    let outcome = run_session(&mut wire, &mut registry, &identity()).expect("should not error");
+    let outcome =
+        run_session(&mut wire, &mut registry, &identity(), &overlay).expect("should not error");
 
     assert!(matches!(
         outcome,
@@ -163,8 +171,10 @@ fn a_reject_ends_the_session_instead_of_retrying_forever() {
 fn the_session_loop_ends_when_the_connection_closes() {
     let mut wire = FakeDeviceWire::new(vec![]);
     let mut registry = registry_with_execute_command();
+    let overlay = OverlayChannel::new();
 
-    let outcome = run_session(&mut wire, &mut registry, &identity()).expect("should not error");
+    let outcome =
+        run_session(&mut wire, &mut registry, &identity(), &overlay).expect("should not error");
 
     assert!(matches!(outcome, SessionOutcome::Closed));
 }

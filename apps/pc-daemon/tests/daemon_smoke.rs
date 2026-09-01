@@ -15,6 +15,7 @@ use fake_computer::FakeComputer;
 use pc_daemon::client::TcpDeviceWire;
 use pc_daemon::config::DeviceIdentity;
 use pc_daemon::daemon::{SessionOutcome, run_session};
+use pc_daemon::overlay_channel::OverlayChannel;
 
 #[test]
 fn a_daemon_can_complete_one_invoke_over_a_real_socket() {
@@ -70,8 +71,9 @@ fn a_daemon_can_complete_one_invoke_over_a_real_socket() {
         token: "secret".to_string(),
     };
 
-    let outcome =
-        run_session(&mut wire, &mut registry, &identity).expect("session should not error");
+    let overlay = OverlayChannel::new();
+    let outcome = run_session(&mut wire, &mut registry, &identity, &overlay)
+        .expect("session should not error");
     assert!(matches!(outcome, SessionOutcome::Closed));
 
     let result = server.join().expect("server thread should not panic");
