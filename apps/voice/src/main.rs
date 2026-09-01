@@ -23,15 +23,22 @@ fn main() {
         return;
     }
 
-    let (mut client, mut events, speech, _chatterbox_supervisor) = match bootstrap::build() {
-        Ok(built) => built,
-        Err(error) => {
-            eprintln!("Error: {error}");
-            std::process::exit(1);
-        }
-    };
+    let (mut client, mut events, speech, _chatterbox_supervisor, greeting) =
+        match bootstrap::build() {
+            Ok(built) => built,
+            Err(error) => {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        };
 
     let transcriber = bootstrap::build_transcriber();
+
+    if !greeting.is_empty() {
+        println!("{greeting}");
+        let _ = speech.say(&greeting);
+        speech.flush();
+    }
 
     loop {
         println!("Apretá Enter para hablar (o escribí 'salir' para terminar)...");

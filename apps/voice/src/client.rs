@@ -35,6 +35,20 @@ impl<W: Wire> NalaClient<W> {
         Self { wire }
     }
 
+    /// Reads the one-time `Greeting` Nala sends right after a connection
+    /// opens, before any turn. Must be called before `send()` — a turn's
+    /// own recv loop doesn't expect this message, so it would otherwise be
+    /// mistaken for noise on whichever turn happens to run first.
+    pub fn recv_greeting(&mut self) -> Result<String, ClientError> {
+        match self.wire.recv()? {
+            Some(ServerMessage::Greeting { text }) => Ok(text),
+            Some(_) => Err(ClientError::Server(
+                "expected a Greeting right after connecting".to_string(),
+            )),
+            None => Err(ClientError::ClosedWithoutReply),
+        }
+    }
+
     /// Sends `text` as one turn's input and drives `on_event` for every
     /// progress event Nala emits while processing it, returning the final
     /// reply's text.
@@ -52,6 +66,11 @@ impl<W: Wire> NalaClient<W> {
                 Some(ServerMessage::Event(event)) => on_event(event),
                 Some(ServerMessage::Reply { text }) => return Ok(text),
                 Some(ServerMessage::Error { message }) => return Err(ClientError::Server(message)),
+                // Only ever sent once, right after connecting — `recv_greeting`
+                // is meant to consume it, but a stray one is ignored rather
+                // than treated as an error, same as unrecognized noise on any
+                // other protocol here.
+                Some(ServerMessage::Greeting { .. }) => {}
                 None => return Err(ClientError::ClosedWithoutReply),
             }
         }

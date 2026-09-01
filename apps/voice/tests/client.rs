@@ -35,6 +35,59 @@ fn task_id() -> TaskId {
 }
 
 #[test]
+fn recv_greeting_returns_the_greeting_text() {
+    let wire = FakeWire::new(vec![ServerMessage::Greeting {
+        text: "hola".to_string(),
+    }]);
+    let mut client = NalaClient::new(wire);
+
+    let greeting = client.recv_greeting().unwrap();
+
+    assert_eq!(greeting, "hola");
+}
+
+#[test]
+fn recv_greeting_errors_on_anything_else() {
+    let wire = FakeWire::new(vec![ServerMessage::Reply {
+        text: "listo".to_string(),
+    }]);
+    let mut client = NalaClient::new(wire);
+
+    let result = client.recv_greeting();
+
+    assert!(matches!(result, Err(ClientError::Server(_))));
+}
+
+#[test]
+fn recv_greeting_on_a_closed_connection_is_an_error_not_a_hang() {
+    let wire = FakeWire::new(vec![]);
+    let mut client = NalaClient::new(wire);
+
+    let result = client.recv_greeting();
+
+    assert!(matches!(result, Err(ClientError::ClosedWithoutReply)));
+}
+
+#[test]
+fn a_stray_greeting_during_a_turn_is_ignored_not_an_error() {
+    let wire = FakeWire::new(vec![
+        ServerMessage::Greeting {
+            text: "hola".to_string(),
+        },
+        ServerMessage::Reply {
+            text: "listo".to_string(),
+        },
+    ]);
+    let mut client = NalaClient::new(wire);
+
+    let reply = client
+        .send("hola", |_event| panic!("no event expected"))
+        .unwrap();
+
+    assert_eq!(reply, "listo");
+}
+
+#[test]
 fn sends_input_and_returns_the_reply_text() {
     let wire = FakeWire::new(vec![ServerMessage::Reply {
         text: "listo".to_string(),

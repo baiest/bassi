@@ -144,7 +144,25 @@ fn the_session_loop_ends_when_the_client_disconnects() {
 
     run_session(assistant, Arc::clone(&wire));
 
-    assert!(wire.lock().unwrap().sent.is_empty());
+    // Only the greeting was sent — no turn ever ran.
+    assert_eq!(wire.lock().unwrap().sent.len(), 1);
+    assert!(matches!(
+        wire.lock().unwrap().sent[0],
+        ServerMessage::Greeting { .. }
+    ));
+}
+
+#[test]
+fn the_greeting_is_sent_before_anything_else() {
+    let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
+        text: "hola".to_string(),
+    }])));
+    let assistant = assistant_with(AlwaysRepliesTextLlm::new(), Arc::clone(&wire));
+
+    run_session(assistant, Arc::clone(&wire));
+
+    let sent = wire.lock().unwrap().sent.clone();
+    assert!(matches!(sent.first(), Some(ServerMessage::Greeting { .. })));
 }
 
 #[test]

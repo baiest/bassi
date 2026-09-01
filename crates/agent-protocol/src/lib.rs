@@ -240,6 +240,10 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    /// Sent once, right when a client connects — before any `Input` — so
+    /// Nala is the one greeting, not each client deciding its own opening
+    /// line. Not a turn: no `TaskId`, no `Event`.
+    Greeting { text: String },
     /// Progress narration for the turn currently in flight.
     Event(Event),
     /// The turn finished successfully with this text.
@@ -273,6 +277,21 @@ mod tests {
         let decoded: ClientMessage = serde_json::from_str(&json).unwrap();
 
         assert!(matches!(decoded, ClientMessage::Cancel));
+    }
+
+    #[test]
+    fn server_message_greeting_round_trips_through_json() {
+        let message = ServerMessage::Greeting {
+            text: "Hola, en que te puedo ayudar?".to_string(),
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            ServerMessage::Greeting { text } => assert_eq!(text, "Hola, en que te puedo ayudar?"),
+            _ => panic!("expected Greeting"),
+        }
     }
 
     #[test]
