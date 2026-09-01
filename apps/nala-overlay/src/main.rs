@@ -12,8 +12,8 @@ fn main() {
     #[cfg(not(windows))]
     {
         eprintln!(
-            "nala-overlay only runs on Windows (it draws over a real Windows desktop, \
-             matching the PC daemon it subscribes to)."
+            "nala-overlay only runs on Windows (it draws over a real Windows desktop \
+             and needs mic/speaker access)."
         );
         std::process::exit(1);
     }

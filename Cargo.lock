@@ -2047,11 +2047,14 @@ dependencies = [
 name = "nala-overlay"
 version = "0.1.0"
 dependencies = [
- "device-protocol",
  "eframe",
  "egui",
- "serde_json",
+ "hound",
+ "rodio",
+ "stt",
+ "thiserror 2.0.20",
  "tungstenite",
+ "voice",
 ]
 
 [[package]]
