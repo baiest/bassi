@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
+use nala::application::devices::registry::DeviceRegistry;
 use nala::bootstrap::{self, DEFAULT_MODEL};
 use nala::cli::prompt::MultilineReader;
 
@@ -11,10 +14,33 @@ use nala::cli::prompt::MultilineReader;
 /// reachable from the LAN until that changes.
 const DEFAULT_ADDR: &str = "127.0.0.1:4180";
 
+/// Default bind address for the device listener, overridable with
+/// `NALA_DEVICE_ADDR`. Loopback-only for the same reason as `DEFAULT_ADDR`
+/// — a connected device can run `execute_command`.
+const DEFAULT_DEVICE_ADDR: &str = "127.0.0.1:4182";
+
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--serve") {
         let addr = std::env::var("NALA_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
-        if let Err(error) = nala::server::serve(&addr) {
+        let device_addr =
+            std::env::var("NALA_DEVICE_ADDR").unwrap_or_else(|_| DEFAULT_DEVICE_ADDR.to_string());
+        // `None` (the env var unset) means every device connection is
+        // rejected — see `device_server::validate_hello` — rather than
+        // silently accepting devices with no authentication at all.
+        let device_token = std::env::var("NALA_DEVICE_TOKEN").ok();
+
+        let devices = Arc::new(DeviceRegistry::new());
+
+        let device_server_devices = Arc::clone(&devices);
+        thread::spawn(move || {
+            if let Err(error) =
+                nala::device_server::serve(&device_addr, device_server_devices, device_token)
+            {
+                eprintln!("Error: could not start the device server on {device_addr}: {error}");
+            }
+        });
+
+        if let Err(error) = nala::server::serve(&addr, devices) {
             eprintln!("Error: could not start the server on {addr}: {error}");
             std::process::exit(1);
         }
@@ -32,7 +58,10 @@ fn main() {
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
 
-    let assistant = bootstrap::build_assistant(events);
+    // The local REPL has no device server running, so no device is ever
+    // connected — an empty registry, not a special case in `build_assistant`.
+    let devices = DeviceRegistry::new();
+    let assistant = bootstrap::build_assistant(events, &devices);
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
     // handles it) cancels the turn instead of killing the process.

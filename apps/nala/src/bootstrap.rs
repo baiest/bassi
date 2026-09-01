@@ -24,8 +24,10 @@ use crate::adapters::http::reqwest::ReqwestFetcher;
 use crate::adapters::llm::ollama::OllamaLlm;
 use crate::adapters::wall_clock::system::SystemWallClock;
 use crate::application::assistant::Assistant;
+use crate::application::devices::registry::DeviceRegistry;
 use crate::application::tools::Tool;
 use crate::application::tools::current_time::CurrentTimeTool;
+use crate::application::tools::device_toolset::DeviceToolset;
 use crate::application::tools::dispatcher::{ToolDispatcher, Tools};
 use crate::application::tools::fetch_url::FetchUrlTool;
 use crate::application::tools::get_weather::GetWeatherTool;
@@ -33,6 +35,7 @@ use crate::application::tools::mcp_toolset::McpToolset;
 use crate::application::tools::ping::PingTool;
 use crate::application::tools::registry::ToolRegistry;
 use crate::application::tools::web_search::WebSearchTool;
+use crate::device_server::Device as DeviceType;
 use crate::ports::events::EventSink;
 #[cfg(windows)]
 use crate::ports::llm::Llm;
@@ -42,7 +45,7 @@ use crate::ports::tool_dispatcher::{ToolDispatcher as ToolDispatcherPort, ToolOu
 pub type ComputerType = Windows<WindowsProcess, SystemEnvironment>;
 pub type McpClientType = StdioMcpClient<ChildTransport>;
 pub type DispatcherType =
-    ToolDispatcher<ComputerType, SystemWallClock, ReqwestFetcher, McpClientType>;
+    ToolDispatcher<ComputerType, SystemWallClock, ReqwestFetcher, McpClientType, DeviceType>;
 
 /// How long to wait for a response to a single MCP request before giving up
 /// on it. Bounded so a wedged MCP server doesn't hang the turn forever.
@@ -58,10 +61,20 @@ const DEFAULT_MCP_CONFIG_PATH: &str = "mcp.json";
 pub const DEFAULT_MODEL: &str = "llama3.2";
 
 /// Builds the fully-wired `Assistant`: the computer adapter, native tools,
-/// optional MCP tools (behind `NALA_MCP=on`), and the Ollama LLM. `events`
-/// is supplied by the caller rather than built here, since it differs
-/// between a headless run and a voice front end that narrates through it.
-pub fn build_assistant<E: EventSink>(events: E) -> Assistant<OllamaLlm, DispatcherType, E> {
+/// optional MCP tools (behind `NALA_MCP=on`), connected devices snapshotted
+/// from `devices`, and the Ollama LLM. `events` is supplied by the caller
+/// rather than built here, since it differs between a headless run and a
+/// voice front end that narrates through it.
+///
+/// `devices` is snapshotted once, at this call — a device connecting or
+/// disconnecting afterwards isn't picked up until the next
+/// `build_assistant` call (the next turn-client connection, in
+/// `nala --serve`). Pass an empty `DeviceRegistry::new()` for a caller
+/// with no device server running (the local REPL).
+pub fn build_assistant<E: EventSink>(
+    events: E,
+    devices: &DeviceRegistry<DeviceType>,
+) -> Assistant<OllamaLlm, DispatcherType, E> {
     let process = WindowsProcess::new();
     let environment = SystemEnvironment::new();
     let computer = Windows::new(process, environment);
@@ -129,6 +142,22 @@ pub fn build_assistant<E: EventSink>(events: E) -> Assistant<OllamaLlm, Dispatch
             }
         }
         dispatcher.register(Tools::Mcp(toolsets));
+    }
+
+    // Every currently-connected device, published as `<device>_<capability>`
+    // tools — see `build_assistant`'s doc comment for why this is a
+    // snapshot rather than something that updates live.
+    let connected_devices = devices.snapshot();
+    if !connected_devices.is_empty() {
+        let mut toolsets = Vec::with_capacity(connected_devices.len());
+        for device in connected_devices {
+            let toolset = DeviceToolset::new(device);
+            for definition in toolset.definitions() {
+                registry.register(definition);
+            }
+            toolsets.push(toolset);
+        }
+        dispatcher.register(Tools::Devices(toolsets));
     }
 
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());

@@ -14,7 +14,9 @@ use tungstenite::{Message, WebSocket};
 
 use crate::adapters::events::console::ConsoleEventSink;
 use crate::application::assistant::Assistant;
+use crate::application::devices::registry::DeviceRegistry;
 use crate::bootstrap;
+use crate::device_server::Device;
 use crate::ports::llm::Llm;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
@@ -141,7 +143,7 @@ pub fn run_session<L, D, E, W>(
     }
 }
 
-fn handle_connection(stream: TcpStream) {
+fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
     let ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
         Err(error) => {
@@ -152,7 +154,7 @@ fn handle_connection(stream: TcpStream) {
 
     let wire = Arc::new(Mutex::new(ws));
     let events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
-    let assistant = bootstrap::build_assistant(events);
+    let assistant = bootstrap::build_assistant(events, &devices);
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that
     // installs a Windows console handler which swallows Ctrl+C (so the
@@ -165,15 +167,18 @@ fn handle_connection(stream: TcpStream) {
 }
 
 /// Binds `addr` and serves one `Assistant` session per accepted connection
-/// on its own thread, forever.
-pub fn serve(addr: &str) -> io::Result<()> {
+/// on its own thread, forever. `devices` is shared with the device server
+/// (`device_server::serve`, on a different port) so every new turn-client
+/// connection sees whatever devices are currently connected.
+pub fn serve(addr: &str, devices: Arc<DeviceRegistry<Device>>) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("Nala listening on ws://{addr}");
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(move || handle_connection(stream));
+                let devices = Arc::clone(&devices);
+                thread::spawn(move || handle_connection(stream, devices));
             }
             Err(error) => eprintln!("Warning: failed to accept a connection: {error}"),
         }
