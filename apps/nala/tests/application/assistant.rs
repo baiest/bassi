@@ -928,6 +928,9 @@ fn every_event_in_a_task_shares_the_same_task_id() {
             | Event::BudgetPressure { task_id, .. }
             | Event::TranscriptCompacted { task_id, .. }
             | Event::AnsweredUnverified { task_id } => task_id,
+            Event::Greeting { .. } => {
+                panic!("Assistant::process never emits Greeting")
+            }
         }
     }
 

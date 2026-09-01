@@ -8,10 +8,8 @@ use std::io;
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use agent_protocol::{ClientMessage, Event, EventSink, ServerMessage};
-use device_protocol::DeviceState;
 use tungstenite::{Message, WebSocket};
 
 use crate::adapters::devices::state_broadcast::DeviceStateBroadcaster;
@@ -20,45 +18,16 @@ use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
 use crate::bootstrap;
 use crate::device_server::Device;
-use crate::ports::device::RemoteDevice;
 use crate::ports::llm::Llm;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
-/// Nala's own greeting — sent to every newly-connected turn client (see
-/// `run_session`) rather than left for each client to hardcode its own
-/// opening line.
+/// Nala's own greeting — emitted as an `Event::Greeting` to every
+/// newly-connected turn client (see `handle_connection`), rather than left
+/// for each client to hardcode its own opening line. Going through the
+/// normal event pipe means it's logged by `ConsoleEventSink` and mirrored
+/// to devices by `DeviceStateBroadcaster` the same as anything else Nala
+/// does — no bespoke wire message or device notification of its own.
 const GREETING_TEXT: &str = "Hola, en que te puedo ayudar?";
-
-/// How many characters per second the greeting is assumed to take to speak.
-/// Devices never see this text or hear this audio (voice is the one
-/// actually speaking it) — this is only used to keep a connected device's
-/// overlay showing `Speaking` for roughly as long as voice would be, via
-/// `notify_devices_of_greeting`.
-const GREETING_CHARS_PER_SECOND: f64 = 15.0;
-
-fn estimate_speaking_duration(text: &str) -> Duration {
-    Duration::from_secs_f64(text.chars().count() as f64 / GREETING_CHARS_PER_SECOND)
-}
-
-/// Mirrors the greeting sent to a newly-connected turn client onto every
-/// currently-connected device's overlay: `Speaking` while voice would be
-/// saying it, back to `Idle` after — reusing the same fire-and-forget
-/// `push_state` a turn's own `TurnState` changes already go through (see
-/// `DeviceStateBroadcaster`), so the daemon needs no code of its own for
-/// this.
-fn notify_devices_of_greeting<D: RemoteDevice + Clone>(devices: &DeviceRegistry<D>, text: &str) {
-    let snapshot = devices.snapshot();
-    if snapshot.is_empty() {
-        return;
-    }
-    for device in &snapshot {
-        device.push_state(DeviceState::Speaking);
-    }
-    thread::sleep(estimate_speaking_duration(text));
-    for device in &snapshot {
-        device.push_state(DeviceState::Idle);
-    }
-}
 
 /// One connection's transport: receiving a client message and sending a
 /// server message. A trait (rather than using `tungstenite::WebSocket`
@@ -146,12 +115,6 @@ where
     ES: EventSink,
     W: Wire,
 {
-    if let Err(error) = wire.lock().unwrap().send(ServerMessage::Greeting {
-        text: GREETING_TEXT.to_string(),
-    }) {
-        eprintln!("Warning: could not send the greeting to the client: {error}");
-    }
-
     loop {
         let message = wire.lock().unwrap().recv();
         match message {
@@ -198,13 +161,14 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
 
     let wire = Arc::new(Mutex::new(ws));
     let events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
-    let events = DeviceStateBroadcaster::new(events, Arc::clone(&devices));
+    let mut events = DeviceStateBroadcaster::new(events, Arc::clone(&devices));
+    // Emitted through the normal event pipe (not sent directly over `wire`)
+    // so it's logged by `ConsoleEventSink` and mirrored to every connected
+    // device's overlay by `DeviceStateBroadcaster`, same as any other event.
+    events.emit(Event::Greeting {
+        text: GREETING_TEXT.to_string(),
+    });
     let assistant = bootstrap::build_assistant(events, &devices);
-
-    // Runs on its own thread so a device slow to react to the greeting
-    // never delays the turn client's own session from starting.
-    let greeting_devices = Arc::clone(&devices);
-    thread::spawn(move || notify_devices_of_greeting(greeting_devices.as_ref(), GREETING_TEXT));
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that
     // installs a Windows console handler which swallows Ctrl+C (so the
@@ -235,82 +199,4 @@ pub fn serve(addr: &str, devices: Arc<DeviceRegistry<Device>>) -> io::Result<()>
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use device_protocol::{CapabilityDefinition, Outcome};
-
-    #[derive(Clone)]
-    struct RecordingDevice {
-        pushed: Arc<Mutex<Vec<DeviceState>>>,
-    }
-
-    impl RecordingDevice {
-        fn new() -> Self {
-            Self {
-                pushed: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn pushed(&self) -> Vec<DeviceState> {
-            self.pushed.lock().unwrap().clone()
-        }
-    }
-
-    impl RemoteDevice for RecordingDevice {
-        fn name(&self) -> &str {
-            "fake"
-        }
-
-        fn capabilities(&self) -> &[CapabilityDefinition] {
-            &[]
-        }
-
-        fn invoke(&mut self, _capability: &str, _arguments: &str) -> Outcome {
-            Outcome::Ok {
-                text: String::new(),
-                mutated: false,
-            }
-        }
-
-        fn push_state(&self, state: DeviceState) {
-            self.pushed.lock().unwrap().push(state);
-        }
-    }
-
-    #[test]
-    fn estimate_speaking_duration_is_zero_for_empty_text() {
-        assert_eq!(estimate_speaking_duration(""), Duration::ZERO);
-    }
-
-    #[test]
-    fn estimate_speaking_duration_scales_with_length() {
-        let short = estimate_speaking_duration("hi");
-        let long = estimate_speaking_duration("hi there, this is quite a bit longer");
-
-        assert!(long > short);
-    }
-
-    #[test]
-    fn notify_devices_of_greeting_pushes_speaking_then_idle_to_every_device() {
-        let registry: DeviceRegistry<RecordingDevice> = DeviceRegistry::new();
-        let device = RecordingDevice::new();
-        registry.register("pc".to_string(), device.clone());
-
-        notify_devices_of_greeting(&registry, "");
-
-        assert_eq!(
-            device.pushed(),
-            vec![DeviceState::Speaking, DeviceState::Idle]
-        );
-    }
-
-    #[test]
-    fn notify_devices_of_greeting_with_no_devices_does_nothing() {
-        let registry: DeviceRegistry<RecordingDevice> = DeviceRegistry::new();
-
-        notify_devices_of_greeting(&registry, "");
-    }
 }

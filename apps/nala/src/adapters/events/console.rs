@@ -126,6 +126,9 @@ impl EventSink for ConsoleEventSink {
             Event::AnsweredUnverified { .. } => {
                 println!("[VERIFY] answered without checking the last action\n");
             }
+            Event::Greeting { text } => {
+                println!("[GREETING] {text}");
+            }
         }
     }
 }

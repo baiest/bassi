@@ -205,6 +205,13 @@ pub enum Event {
     AnsweredUnverified {
         task_id: TaskId,
     },
+
+    /// Sent once, right when a client connects — before any turn — so Nala
+    /// is the one greeting, not each client deciding its own opening line.
+    /// Not tied to a task: no `task_id`.
+    Greeting {
+        text: String,
+    },
 }
 
 /// Which eviction step fired in a `BudgetPressure` event, in the order the
@@ -240,10 +247,6 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    /// Sent once, right when a client connects — before any `Input` — so
-    /// Nala is the one greeting, not each client deciding its own opening
-    /// line. Not a turn: no `TaskId`, no `Event`.
-    Greeting { text: String },
     /// Progress narration for the turn currently in flight.
     Event(Event),
     /// The turn finished successfully with this text.
@@ -280,17 +283,19 @@ mod tests {
     }
 
     #[test]
-    fn server_message_greeting_round_trips_through_json() {
-        let message = ServerMessage::Greeting {
+    fn a_greeting_event_round_trips_through_json_wrapped_in_a_server_message() {
+        let message = ServerMessage::Event(Event::Greeting {
             text: "Hola, en que te puedo ayudar?".to_string(),
-        };
+        });
 
         let json = serde_json::to_string(&message).unwrap();
         let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
 
         match decoded {
-            ServerMessage::Greeting { text } => assert_eq!(text, "Hola, en que te puedo ayudar?"),
-            _ => panic!("expected Greeting"),
+            ServerMessage::Event(Event::Greeting { text }) => {
+                assert_eq!(text, "Hola, en que te puedo ayudar?")
+            }
+            _ => panic!("expected Event(Greeting)"),
         }
     }
 

@@ -36,9 +36,9 @@ fn task_id() -> TaskId {
 
 #[test]
 fn recv_greeting_returns_the_greeting_text() {
-    let wire = FakeWire::new(vec![ServerMessage::Greeting {
+    let wire = FakeWire::new(vec![ServerMessage::Event(Event::Greeting {
         text: "hola".to_string(),
-    }]);
+    })]);
     let mut client = NalaClient::new(wire);
 
     let greeting = client.recv_greeting().unwrap();
@@ -69,20 +69,22 @@ fn recv_greeting_on_a_closed_connection_is_an_error_not_a_hang() {
 }
 
 #[test]
-fn a_stray_greeting_during_a_turn_is_ignored_not_an_error() {
+fn a_stray_greeting_during_a_turn_is_forwarded_like_any_other_event() {
     let wire = FakeWire::new(vec![
-        ServerMessage::Greeting {
+        ServerMessage::Event(Event::Greeting {
             text: "hola".to_string(),
-        },
+        }),
         ServerMessage::Reply {
             text: "listo".to_string(),
         },
     ]);
     let mut client = NalaClient::new(wire);
 
-    let reply = client
-        .send("hola", |_event| panic!("no event expected"))
-        .unwrap();
+    let mut seen = Vec::new();
+    let reply = client.send("hola", |event| seen.push(event)).unwrap();
+
+    assert_eq!(seen.len(), 1);
+    assert!(matches!(seen[0], Event::Greeting { .. }));
 
     assert_eq!(reply, "listo");
 }

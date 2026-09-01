@@ -90,9 +90,9 @@ fn spawn_fake_nala(turns: Vec<Vec<ServerMessage>>) -> String {
         // Real Nala sends this once, right after connecting, before ever
         // reading a ClientMessage — VoiceSession's reconnect path expects
         // it first.
-        let greeting = serde_json::to_string(&ServerMessage::Greeting {
+        let greeting = serde_json::to_string(&ServerMessage::Event(Event::Greeting {
             text: "hola".to_string(),
-        })
+        }))
         .unwrap();
         ws.send(Message::Text(greeting)).expect("send the greeting");
 
