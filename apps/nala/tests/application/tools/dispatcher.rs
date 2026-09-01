@@ -1,4 +1,5 @@
 use crate::fake_computer::FakeComputer;
+use crate::fake_device::FakeDevice;
 use crate::fake_mcp::FakeMcpClient;
 use device_capabilities::Capability;
 use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
@@ -7,8 +8,9 @@ use device_capabilities::capabilities::open_app::OpenAppTool;
 use device_capabilities::capabilities::open_url::OpenUrlTool;
 use device_capabilities::capabilities::volume::VolumeTool;
 use mcp::McpToolResult;
+use nala::application::tools::device_toolset::DeviceToolset;
 use nala::application::tools::dispatcher::{
-    NoHttpFetcher, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
+    NoHttpFetcher, NoMcpClient, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
 };
 use nala::application::tools::mcp_toolset::McpToolset;
 use nala::application::tools::ping::PingTool;
@@ -310,4 +312,47 @@ fn dispatches_to_the_mcp_toolset_and_carries_images_through() {
 
     assert_eq!(outcome.text, "here are the results");
     assert_eq!(outcome.images, vec!["YmFzZTY0ZGF0YQ==".to_string()]);
+}
+
+#[test]
+fn the_dispatcher_routes_a_prefixed_tool_call_to_its_device() {
+    let device = FakeDevice::new("pc")
+        .with_capability("open_app", "Opens an app")
+        .returning(device_protocol::Outcome::Ok {
+            text: "opened Spotify".to_string(),
+            mutated: true,
+        });
+    let toolset = DeviceToolset::new(device);
+
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, NoMcpClient, FakeDevice>::new();
+    dispatcher.register(Tools::Devices(vec![toolset]));
+
+    let tool_call = ToolCall {
+        name: "pc_open_app".to_string(),
+        arguments: r#"{"app":"Spotify"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert_eq!(outcome.text, "opened Spotify");
+    assert!(outcome.mutated);
+}
+
+#[test]
+fn a_tool_call_for_a_disconnected_device_is_a_tool_not_found_error() {
+    let mut dispatcher =
+        ToolDispatcher::<FakeComputer, NoWallClock, NoHttpFetcher, NoMcpClient, FakeDevice>::new();
+    // No `Tools::Devices` registered at all — the PC daemon never
+    // connected, or dropped before this call.
+    dispatcher.register(Tools::Ping(PingTool::new()));
+
+    let tool_call = ToolCall {
+        name: "pc_open_app".to_string(),
+        arguments: "{}".to_string(),
+    };
+
+    let result = dispatcher.dispatch(tool_call);
+
+    assert!(matches!(result, Err(ToolDispatcherError::ToolNotFound)));
 }
