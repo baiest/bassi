@@ -3,4 +3,5 @@
 //! `DeviceState`. Never talks to Nala directly, never runs a capability —
 //! purely a viewer over what the daemon already broadcasts.
 
+pub mod animation;
 pub mod color;

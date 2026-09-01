@@ -1,11 +1,16 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use device_protocol::DeviceState;
 use eframe::egui;
 
+use nala_overlay::animation::{arc_offsets, pulse_scale, ring_sweep};
 use nala_overlay::color::state_color;
+
+/// How many points make up the drawn ring — enough for a smooth curve on
+/// an 80x80 window without doing more math than the shape needs.
+const RING_SEGMENTS: usize = 24;
 
 /// Where the PC daemon's overlay channel lives — not configurable, since
 /// the channel itself is loopback-only with no auth (see
@@ -54,6 +59,10 @@ fn spawn_state_listener() -> Arc<Mutex<DeviceState>> {
 
 struct OverlayApp {
     state: Arc<Mutex<DeviceState>>,
+    // Animation is time-driven (see `animation::pulse_scale`/`ring_sweep`),
+    // not frame-count-driven, so it looks the same at any frame rate — this
+    // is just the clock it's measured against.
+    start: Instant,
 }
 
 impl eframe::App for OverlayApp {
@@ -66,14 +75,30 @@ impl eframe::App for OverlayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let current = *self.state.lock().unwrap();
         let color = state_color(current);
+        let elapsed = self.start.elapsed();
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
                 let center = rect.center();
-                let radius = rect.width().min(rect.height()) / 2.0 - 4.0;
+                // Base radius leaves room for the pulse and the ring, which
+                // both draw outside the resting circle, so neither clips
+                // against the 80x80 window.
+                let base_radius = rect.width().min(rect.height()) / 2.0 - 10.0;
+                let radius = base_radius * pulse_scale(current, elapsed);
                 ui.painter().circle_filled(center, radius, color);
+
+                if let Some((start, sweep)) = ring_sweep(current, elapsed) {
+                    let ring_radius = radius + 6.0;
+                    let points: Vec<egui::Pos2> =
+                        arc_offsets(start, sweep, ring_radius, RING_SEGMENTS)
+                            .into_iter()
+                            .map(|(x, y)| center + egui::vec2(x, y))
+                            .collect();
+                    ui.painter()
+                        .add(egui::Shape::line(points, egui::Stroke::new(3.0f32, color)));
+                }
 
                 // No decorations means no title bar to drag by — clicking
                 // and dragging anywhere on the circle moves the window
@@ -88,9 +113,10 @@ impl eframe::App for OverlayApp {
                 }
             });
 
-        // Repaint on a short interval (not only on input) so a state
-        // change delivered on the background thread shows up promptly.
-        ctx.request_repaint_after(Duration::from_millis(100));
+        // Repaint on a short interval (not only on input) so the pulse/ring
+        // animation and any state change delivered on the background
+        // thread both show up smoothly.
+        ctx.request_repaint_after(Duration::from_millis(16));
     }
 }
 
@@ -111,6 +137,11 @@ pub fn run() -> eframe::Result<()> {
     eframe::run_native(
         "Nala Overlay",
         options,
-        Box::new(|_cc| Ok(Box::new(OverlayApp { state }))),
+        Box::new(|_cc| {
+            Ok(Box::new(OverlayApp {
+                state,
+                start: Instant::now(),
+            }))
+        }),
     )
 }
