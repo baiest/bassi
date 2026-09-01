@@ -1,0 +1,12 @@
+[package]
+name = "device-capabilities"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+device-protocol = { path = "../device-protocol" }
+process-group = { path = "../process-group" }
+schemars = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

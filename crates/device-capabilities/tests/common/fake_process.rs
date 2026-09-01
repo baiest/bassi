@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nala::ports::process::{Process, ProcessError};
+use device_capabilities::ports::process::{Process, ProcessError};
 
 pub struct FakeProcess {
     pub spawned: Option<String>,

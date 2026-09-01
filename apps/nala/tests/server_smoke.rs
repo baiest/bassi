@@ -19,13 +19,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use agent_protocol::{ClientMessage, ServerMessage};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
 use fake_computer::FakeComputer;
 use fake_events::RecordingEventSink;
 use fake_llm::AlwaysRepliesTextLlm;
 use nala::application::assistant::Assistant;
-use nala::application::tools::Tool;
 use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
-use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::registry::ToolRegistry;
 use nala::server::{WsEventSink, run_session};
 use tungstenite::Message;
@@ -41,7 +41,7 @@ fn a_client_can_complete_one_turn_over_a_real_socket() {
         let wire = Arc::new(Mutex::new(ws));
 
         let mut registry = ToolRegistry::new();
-        registry.register(ExecuteCommandTool::<FakeComputer>::definition());
+        registry.register(ExecuteCommandTool::<FakeComputer>::definition().into());
         let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
         dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
             FakeComputer::new(),

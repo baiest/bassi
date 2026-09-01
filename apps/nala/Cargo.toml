@@ -7,6 +7,8 @@ edition = "2024"
 agent-protocol = { path = "../../crates/agent-protocol" }
 chrono = { workspace = true }
 csv = "1"
+device-capabilities = { path = "../../crates/device-capabilities" }
+device-protocol = { path = "../../crates/device-protocol" }
 mcp = { path = "../../crates/mcp" }
 process-group = { path = "../../crates/process-group" }
 reedline = "0.38"

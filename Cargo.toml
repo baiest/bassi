@@ -4,6 +4,7 @@ members = [
     "apps/voice",
     "crates/agent-protocol",
     "crates/device-protocol",
+    "crates/device-capabilities",
     "crates/mcp",
     "crates/tts",
     "crates/stt",

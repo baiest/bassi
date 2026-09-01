@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use nala::adapters::process::windows::Windows;
-use nala::ports::process::{Process, ProcessError};
+use device_capabilities::adapters::process::windows::Windows;
+use device_capabilities::ports::process::{Process, ProcessError};
 
 /// Exercises the real adapter against a real OS process — unlike the rest
 /// of the suite, which uses `FakeProcess`. Kept minimal (two cases) since a

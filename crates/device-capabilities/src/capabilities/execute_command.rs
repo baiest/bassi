@@ -1,10 +1,12 @@
 use std::time::Duration;
 
-use crate::application::tools::{Tool, ToolDefinition};
-use crate::ports::computer::{Computer, ComputerError};
-use crate::ports::process::Process;
+use device_protocol::CapabilityDefinition;
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+use crate::capability::Capability;
+use crate::ports::computer::{Computer, ComputerError};
+use crate::ports::process::Process;
 
 /// How long a shell command may run before it's killed. Generous, because
 /// legitimate commands (`start chrome`, installers, ...) can take a while
@@ -39,7 +41,7 @@ impl<C: Computer> ExecuteCommandTool<C> {
     }
 }
 
-impl<C: Computer> Tool for ExecuteCommandTool<C> {
+impl<C: Computer> Capability for ExecuteCommandTool<C> {
     type Args = ExecuteCommandArgs;
     type Output = String;
     type Error = ComputerError;
@@ -69,8 +71,8 @@ impl<C: Computer> Tool for ExecuteCommandTool<C> {
         serde_json::from_str(args).map_err(|error| ComputerError::CommandFailed(error.to_string()))
     }
 
-    fn definition() -> ToolDefinition {
-        ToolDefinition {
+    fn definition() -> CapabilityDefinition {
+        CapabilityDefinition {
             name: Self::NAME.to_string(),
             description: format!(
                 "{} {}",

@@ -14,13 +14,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use agent_protocol::{ClientMessage, ServerMessage};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
 use fake_computer::FakeComputer;
 use fake_events::RecordingEventSink;
 use fake_llm::{AlwaysRepliesTextLlm, FailingLlm};
 use nala::application::assistant::Assistant;
-use nala::application::tools::Tool;
 use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
-use nala::application::tools::execute_command::ExecuteCommandTool;
 use nala::application::tools::registry::ToolRegistry;
 use nala::server::{Wire, WsEventSink, run_session};
 
@@ -60,7 +60,7 @@ where
     L: nala::ports::llm::Llm + Send + 'static,
 {
     let mut registry = ToolRegistry::new();
-    registry.register(ExecuteCommandTool::<FakeComputer>::definition());
+    registry.register(ExecuteCommandTool::<FakeComputer>::definition().into());
 
     let mut dispatcher = ToolDispatcher::new();
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(

@@ -1,13 +1,18 @@
 use crate::fake_computer::FakeComputer;
-use nala::application::tools::execute_command::ExecuteCommandTool;
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
+use nala::application::tools::ToolDefinition;
 use nala::application::tools::registry::ToolRegistry;
-use nala::application::tools::{Tool, ToolDefinition};
+
+fn execute_command_definition() -> ToolDefinition {
+    ExecuteCommandTool::<FakeComputer>::definition().into()
+}
 
 #[test]
 fn can_register_and_find_a_tool() {
     let mut registry = ToolRegistry::new();
 
-    registry.register(ExecuteCommandTool::<FakeComputer>::definition());
+    registry.register(execute_command_definition());
 
     let definition = registry.get("execute_command");
 
@@ -26,7 +31,7 @@ fn returns_none_when_tool_does_not_exist() {
 fn can_register_multiple_tools() {
     let mut registry = ToolRegistry::new();
 
-    let execute_command = ExecuteCommandTool::<FakeComputer>::definition();
+    let execute_command = execute_command_definition();
 
     let another_tool = ToolDefinition {
         name: "another_tool".to_string(),

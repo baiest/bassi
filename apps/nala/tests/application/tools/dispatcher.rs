@@ -1,17 +1,17 @@
 use crate::fake_computer::FakeComputer;
 use crate::fake_mcp::FakeMcpClient;
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
+use device_capabilities::capabilities::list_apps::ListAppsTool;
+use device_capabilities::capabilities::open_app::OpenAppTool;
+use device_capabilities::capabilities::open_url::OpenUrlTool;
+use device_capabilities::capabilities::volume::VolumeTool;
 use mcp::McpToolResult;
-use nala::application::tools::Tool;
 use nala::application::tools::dispatcher::{
     NoHttpFetcher, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
 };
-use nala::application::tools::execute_command::ExecuteCommandTool;
-use nala::application::tools::list_apps::ListAppsTool;
 use nala::application::tools::mcp_toolset::McpToolset;
-use nala::application::tools::open_app::OpenAppTool;
-use nala::application::tools::open_url::OpenUrlTool;
 use nala::application::tools::ping::PingTool;
-use nala::application::tools::volume::VolumeTool;
 use nala::ports::llm::ToolCall;
 use nala::ports::tool_dispatcher::ToolDispatcher as _;
 

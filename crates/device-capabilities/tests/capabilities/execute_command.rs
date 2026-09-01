@@ -1,6 +1,6 @@
 use crate::fake_computer::FakeComputer;
-use nala::application::tools::Tool;
-use nala::application::tools::execute_command::{ExecuteCommandArgs, ExecuteCommandTool};
+use device_capabilities::Capability;
+use device_capabilities::capabilities::execute_command::{ExecuteCommandArgs, ExecuteCommandTool};
 use schemars::schema_for;
 
 #[test]
