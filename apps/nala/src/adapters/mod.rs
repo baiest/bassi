@@ -1,5 +1,6 @@
 pub mod cancellation;
 pub mod clock;
+pub mod devices;
 pub mod events;
 pub mod http;
 pub mod llm;
