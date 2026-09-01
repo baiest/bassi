@@ -8,5 +8,6 @@ pub mod adapters;
 pub mod capabilities;
 pub mod capability;
 pub mod ports;
+pub mod registry;
 
 pub use capability::Capability;
