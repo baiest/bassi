@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nala runs unauthenticated on a home LAN (see BAS-29/BAS-30) — cleartext
+  ws:// is accepted everywhere on purpose, since this app is only meant to
+  be pointed at a machine on the user's own network, never the internet.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
