@@ -73,6 +73,18 @@ impl eframe::App for OverlayApp {
                 let center = rect.center();
                 let radius = rect.width().min(rect.height()) / 2.0 - 4.0;
                 ui.painter().circle_filled(center, radius, color);
+
+                // No decorations means no title bar to drag by — clicking
+                // and dragging anywhere on the circle moves the window
+                // instead, the usual pattern for borderless egui windows.
+                let response = ui.interact(
+                    rect,
+                    egui::Id::new("overlay_drag_area"),
+                    egui::Sense::click_and_drag(),
+                );
+                if response.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
             });
 
         // Repaint on a short interval (not only on input) so a state
@@ -88,8 +100,7 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([80.0, 80.0])
         .with_decorations(false)
         .with_transparent(true)
-        .with_window_level(egui::WindowLevel::AlwaysOnTop)
-        .with_mouse_passthrough(true);
+        .with_window_level(egui::WindowLevel::AlwaysOnTop);
 
     let options = eframe::NativeOptions {
         viewport,
