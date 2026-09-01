@@ -30,24 +30,36 @@ const DEFAULT_ADDR: &str = "127.0.0.1:4180";
 /// `AsyncSpeech` handle separately so `main` can speak the final answer
 /// after a turn completes, and the `ChatterboxSupervisor` (if one was
 /// started) so `main` can keep it alive.
-pub fn build() -> Result<
-    (
-        NalaClient<TcpWire>,
-        Events,
-        AsyncSpeech,
-        Option<ChatterboxSupervisor>,
-    ),
-    ClientError,
-> {
+/// `NalaClient`, its narrating event sink, the speech handle to speak the
+/// final answer with, the optional locally-managed Chatterbox process, and
+/// the greeting text Nala sent right after connecting (empty if it
+/// couldn't be received — see `build`).
+pub type Built = (
+    NalaClient<TcpWire>,
+    Events,
+    AsyncSpeech,
+    Option<ChatterboxSupervisor>,
+    String,
+);
+
+pub fn build() -> Result<Built, ClientError> {
     let (backend, chatterbox_supervisor) = speech_backend();
     let speech = AsyncSpeech::new(backend);
 
     let events = SpeakingEventSink::new(NoopEventSink, TemplateNarrator::new(), speech.clone());
 
     let addr = std::env::var("NALA_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
-    let client = NalaClient::new(TcpWire::connect(&addr)?);
+    let mut client = NalaClient::new(TcpWire::connect(&addr)?);
 
-    Ok((client, events, speech, chatterbox_supervisor))
+    // Nala is the one greeting (not a hardcoded line here) — best-effort:
+    // a connection that can't produce one still starts up and just skips
+    // speaking a greeting, rather than failing to start at all.
+    let greeting = client.recv_greeting().unwrap_or_else(|error| {
+        eprintln!("Warning: could not receive the greeting from nala: {error}");
+        String::new()
+    });
+
+    Ok((client, events, speech, chatterbox_supervisor, greeting))
 }
 
 /// Loads the Whisper model once at startup. Loading is slow (reads the

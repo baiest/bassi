@@ -148,8 +148,8 @@ impl VoiceSession {
     fn run_turn(&self, text: &str) {
         let mut client_slot = self.client.lock().unwrap();
         if client_slot.is_none() {
-            match TcpWire::connect(&self.nala_addr) {
-                Ok(wire) => *client_slot = Some(NalaClient::new(wire)),
+            let mut client = match TcpWire::connect(&self.nala_addr) {
+                Ok(wire) => NalaClient::new(wire),
                 Err(error) => {
                     eprintln!(
                         "Error: could not connect to nala at {}: {error}",
@@ -157,7 +157,28 @@ impl VoiceSession {
                     );
                     return;
                 }
+            };
+
+            // Nala is the one greeting — synthesize it the same way as any
+            // other reply and queue it, so whichever phone connects next
+            // hears it. Best-effort: a connection that can't produce a
+            // greeting still proceeds to serve turns.
+            match client.recv_greeting() {
+                Ok(greeting) if !greeting.is_empty() => {
+                    match synthesize_to_wav(self.synth.lock().unwrap().as_ref(), &greeting) {
+                        Ok(clip) => self.outbox.push(clip),
+                        Err(error) => {
+                            eprintln!("Warning: could not synthesize the greeting: {error}")
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("Warning: could not receive the greeting from nala: {error}")
+                }
             }
+
+            *client_slot = Some(client);
         }
         let client = client_slot.as_mut().expect("just ensured connected");
 

@@ -29,20 +29,22 @@ fn main() {
 }
 
 fn run_local() {
-    let (mut client, mut events, speech, _chatterbox_supervisor) = match bootstrap::build() {
-        Ok(built) => built,
-        Err(error) => {
-            eprintln!("Error: {error}");
-            std::process::exit(1);
-        }
-    };
+    let (mut client, mut events, speech, _chatterbox_supervisor, greeting) =
+        match bootstrap::build() {
+            Ok(built) => built,
+            Err(error) => {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        };
 
     let transcriber = bootstrap::build_transcriber();
 
-    let greeting = "Hola, en que te puedo ayudar?";
-    println!("{greeting}");
-    let _ = speech.say(greeting);
-    speech.flush();
+    if !greeting.is_empty() {
+        println!("{greeting}");
+        let _ = speech.say(&greeting);
+        speech.flush();
+    }
 
     loop {
         println!("Apretá Enter para hablar (o escribí 'salir' para terminar)...");

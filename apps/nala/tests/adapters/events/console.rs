@@ -15,6 +15,15 @@ fn should_emit_event() {
 }
 
 #[test]
+fn should_emit_greeting_event() {
+    let mut sink = ConsoleEventSink;
+
+    sink.emit(Event::Greeting {
+        text: "Hola, en que te puedo ayudar?".to_string(),
+    });
+}
+
+#[test]
 fn should_emit_llm_failed_event() {
     let mut sink = ConsoleEventSink;
 
