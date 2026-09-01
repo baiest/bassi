@@ -9,5 +9,6 @@ pub mod bootstrap;
 pub mod client;
 pub mod narration;
 pub mod narrator;
+pub mod session;
 pub mod speaking_sink;
 pub mod wav;
