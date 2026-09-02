@@ -20,6 +20,14 @@ const DEFAULT_VOICE_ADDR: &str = "127.0.0.1:4181";
 /// How long to wait before retrying a dropped or failed connection.
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
+/// How often the clip-reading thread polls for the next message. A
+/// blocking read here would hold `Shared::connection`'s lock indefinitely
+/// (nothing arrives from `voice` until it has a clip to send), starving
+/// `record_and_send`'s attempt to lock the same connection to send an
+/// utterance — same reasoning as `nala::device_server`'s own
+/// `READ_POLL_INTERVAL`.
+const READ_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 type Socket = WebSocket<MaybeTlsStream<std::net::TcpStream>>;
 
 /// Everything the UI thread shares with the recording/networking
@@ -60,7 +68,15 @@ impl Shared {
 fn spawn_connection_manager(shared: Arc<Shared>, voice_addr: String, player: Arc<ClipPlayer>) {
     thread::spawn(move || {
         loop {
-            if let Ok((socket, _response)) = tungstenite::connect(format!("ws://{voice_addr}")) {
+            if let Ok((mut socket, _response)) = tungstenite::connect(format!("ws://{voice_addr}"))
+            {
+                if let MaybeTlsStream::Plain(tcp) = socket.get_mut()
+                    && let Err(error) = tcp.set_read_timeout(Some(READ_POLL_INTERVAL))
+                {
+                    eprintln!(
+                        "Warning: could not set a read timeout on the voice connection: {error}"
+                    );
+                }
                 let socket = Arc::new(Mutex::new(socket));
                 *shared.connection.lock().unwrap() = Some(Arc::clone(&socket));
 
@@ -76,15 +92,16 @@ fn spawn_connection_manager(shared: Arc<Shared>, voice_addr: String, player: Arc
 }
 
 fn run_clip_loop_shared(socket: &Arc<Mutex<Socket>>, player: &Arc<ClipPlayer>) {
-    // `VoiceConnection::poll` reads through the shared lock; a real socket
-    // has no way to poll with a short timeout here without changing its
-    // read timeout up front, so this loop holds the lock for the whole
-    // blocking read — fine, since nothing else needs to read concurrently
-    // (sending an utterance takes the same lock only briefly, in between
-    // reads). Status while a clip plays is owned by `playback::spawn`, not
-    // here.
-    let mut guard = socket.lock().unwrap();
-    run_clip_loop(&mut *guard, |clip| player.enqueue(clip));
+    // `Arc<Mutex<Socket>>` itself implements `VoiceConnection` (see
+    // voice_client.rs), locking only for the duration of each individual
+    // `poll()`/`send_utterance()` call rather than holding it for the
+    // whole loop — each `poll()` still returns within `READ_POLL_INTERVAL`
+    // (the read timeout set where this socket was connected) instead of
+    // blocking indefinitely, so `record_and_send`'s send gets a chance to
+    // acquire the lock between polls instead of starving forever. Status
+    // while a clip plays is owned by `playback::spawn`, not here.
+    let mut connection = Arc::clone(socket);
+    run_clip_loop(&mut connection, |clip| player.enqueue(clip));
 }
 
 /// Records while `shared.is_held` stays true, updating `shared.amplitude`
