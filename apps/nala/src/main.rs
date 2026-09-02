@@ -60,8 +60,8 @@ fn main() {
 
     // The local REPL has no device server running, so no device is ever
     // connected — an empty registry, not a special case in `build_assistant`.
-    let devices = DeviceRegistry::new();
-    let assistant = bootstrap::build_assistant(events, &devices);
+    let devices = Arc::new(DeviceRegistry::new());
+    let assistant = bootstrap::build_assistant(events, devices);
 
     // Ctrl+C during a turn (not at the prompt, where reedline already
     // handles it) cancels the turn instead of killing the process.

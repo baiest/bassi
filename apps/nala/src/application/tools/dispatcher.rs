@@ -9,11 +9,16 @@ use device_capabilities::ports::computer::Computer;
 use device_protocol::{CapabilityDefinition, Outcome};
 use mcp::McpClient;
 
+use std::sync::Arc;
+
 use crate::{
-    application::tools::{
-        Tool, current_time::CurrentTimeTool, device_toolset::DeviceToolset,
-        fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
-        ping::PingTool, web_search::WebSearchTool,
+    application::{
+        devices::registry::DeviceRegistry,
+        tools::{
+            Tool, current_time::CurrentTimeTool, device_toolset::DeviceToolset,
+            fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
+            ping::PingTool, web_search::WebSearchTool,
+        },
     },
     ports::{
         device::RemoteDevice,
@@ -87,7 +92,7 @@ impl HttpFetcher for NoHttpFetcher {
 /// A `RemoteDevice` that is never actually connected — the default for `R`
 /// so callers that don't use `Tools::Devices` (most tests, and any Nala
 /// with no devices attached) don't have to name a device type at all.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NoDevice;
 
 impl RemoteDevice for NoDevice {
@@ -143,24 +148,97 @@ pub struct ToolDispatcher<
     CL: WallClock = NoWallClock,
     H: HttpFetcher = NoHttpFetcher,
     M: McpClient = NoMcpClient,
-    R: RemoteDevice = NoDevice,
+    R: RemoteDevice + Clone = NoDevice,
 > {
     tools: Vec<Tools<C, CL, H, M, R>>,
+    /// The live source of truth for connected devices, when one is wired
+    /// up (`with_device_registry`). Re-snapshotted on every `dispatch` /
+    /// `device_tools` call (see `sync_devices`) rather than once at
+    /// construction, so a device connecting or disconnecting mid-session is
+    /// picked up without the turn-client reconnecting. `None` for callers
+    /// with no device server at all (the local REPL, most tests) — devices
+    /// registered directly via `Tools::Devices` still work either way.
+    device_registry: Option<Arc<DeviceRegistry<R>>>,
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice>
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice + Clone>
     ToolDispatcher<C, CL, H, M, R>
 {
     pub fn new() -> Self {
-        Self { tools: Vec::new() }
+        Self {
+            tools: Vec::new(),
+            device_registry: None,
+        }
     }
 
     pub fn register(&mut self, tool: Tools<C, CL, H, M, R>) {
         self.tools.push(tool);
     }
+
+    /// Wires a live `DeviceRegistry` in, so connected devices are picked up
+    /// as they come and go instead of being fixed at construction time.
+    pub fn with_device_registry(mut self, registry: Arc<DeviceRegistry<R>>) -> Self {
+        self.device_registry = Some(registry);
+        self
+    }
+
+    /// Replaces every `Tools::Devices` entry with one built fresh from the
+    /// registry's current snapshot. A no-op when no registry is wired up.
+    fn sync_devices(&mut self) {
+        let Some(registry) = &self.device_registry else {
+            return;
+        };
+
+        self.tools.retain(|tool| !matches!(tool, Tools::Devices(_)));
+
+        let devices = registry.snapshot();
+        if !devices.is_empty() {
+            self.tools.push(Tools::Devices(
+                devices.into_iter().map(DeviceToolset::new).collect(),
+            ));
+        }
+    }
+
+    /// Routes `tool_call` to a connected device when one handles it — either
+    /// its exact prefixed name (`pc_open_url`) or, when exactly one device
+    /// publishes the bare capability (`open_url`), that name too. With more
+    /// than one device publishing the same bare capability there's no way
+    /// to tell which the model meant, so it's left unhandled here and falls
+    /// through to the native tool (which still requires the prefix to reach
+    /// a specific device).
+    fn dispatch_to_device(&mut self, tool_call: &ToolCall) -> Option<ToolOutcome> {
+        for tool in &mut self.tools {
+            let Tools::Devices(toolsets) = tool else {
+                continue;
+            };
+
+            if let Some(toolset) = toolsets
+                .iter_mut()
+                .find(|toolset| toolset.handles(&tool_call.name))
+            {
+                return Some(toolset.call(&tool_call.name, &tool_call.arguments));
+            }
+
+            let mut bare_matches: Vec<usize> = toolsets
+                .iter()
+                .enumerate()
+                .filter(|(_, toolset)| toolset.handles_bare(&tool_call.name))
+                .map(|(index, _)| index)
+                .collect();
+
+            if bare_matches.len() == 1 {
+                let index = bare_matches.remove(0);
+                return Some(toolsets[index].call(&tool_call.name, &tool_call.arguments));
+            }
+
+            return None;
+        }
+
+        None
+    }
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> Default
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice + Clone> Default
     for ToolDispatcher<C, CL, H, M, R>
 {
     fn default() -> Self {
@@ -168,13 +246,23 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> 
     }
 }
 
-impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> ToolDispatcherPort
-    for ToolDispatcher<C, CL, H, M, R>
+impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice + Clone>
+    ToolDispatcherPort for ToolDispatcher<C, CL, H, M, R>
 {
     type Output = ToolOutcome;
     type Error = ToolDispatcherError;
 
     fn dispatch(&mut self, tool_call: ToolCall) -> Result<Self::Output, Self::Error> {
+        self.sync_devices();
+
+        // A connected device always wins over a native tool doing the same
+        // thing — checked before the native arms below, not after, so a
+        // bare name (`open_url`) reaches the device the user meant instead
+        // of running locally in this process. See `dispatch_to_device`.
+        if let Some(outcome) = self.dispatch_to_device(&tool_call) {
+            return Ok(outcome);
+        }
+
         for tool in &mut self.tools {
             match tool {
                 Tools::ExecuteCommand(tool) if tool_call.name == ExecuteCommandTool::<C>::NAME => {
@@ -339,21 +427,29 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> 
                         mutated: false,
                     });
                 }
-                Tools::Devices(toolsets) => {
-                    let Some(toolset) = toolsets
-                        .iter_mut()
-                        .find(|toolset| toolset.handles(&tool_call.name))
-                    else {
-                        continue;
-                    };
-
-                    return Ok(toolset.call(&tool_call.name, &tool_call.arguments));
-                }
                 _ => continue,
             }
         }
 
         Err(ToolDispatcherError::ToolNotFound)
+    }
+
+    fn device_tools(&mut self) -> Vec<crate::ports::tool::ToolDefinition> {
+        self.sync_devices();
+
+        // `device_toolset.rs::DeviceToolset::definitions()` returns owned
+        // `ToolDefinition`s, so this just concatenates each connected
+        // device's list — no snapshot staleness, since `sync_devices` just
+        // rebuilt `self.tools`'s device layer from the live registry.
+        let mut definitions = Vec::new();
+        for tool in &self.tools {
+            if let Tools::Devices(toolsets) = tool {
+                for toolset in toolsets {
+                    definitions.extend(toolset.definitions());
+                }
+            }
+        }
+        definitions
     }
 
     fn get_context(&mut self) -> Result<String, Self::Error> {
@@ -366,5 +462,162 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice> 
         }
 
         Err(ToolDispatcherError::ToolNotFound)
+    }
+}
+
+#[cfg(test)]
+mod device_routing_tests {
+    use super::*;
+    use crate::application::tools::ping::PingTool;
+    use device_capabilities::adapters::computer::windows::Windows;
+    use device_capabilities::adapters::environment::system::SystemEnvironment;
+    use device_capabilities::adapters::process::windows::Windows as WindowsProcess;
+
+    type TestComputer = Windows<WindowsProcess, SystemEnvironment>;
+
+    /// A `RemoteDevice` that always answers `Outcome::Ok` naming itself, so
+    /// a test can tell whether a call reached the device (vs. the native
+    /// tool, which would instead go through `PingTool::execute`).
+    #[derive(Clone)]
+    struct FakeDevice {
+        device_name: &'static str,
+        capabilities: Vec<CapabilityDefinition>,
+    }
+
+    impl FakeDevice {
+        fn publishing(device_name: &'static str, capability: &str) -> Self {
+            Self {
+                device_name,
+                capabilities: vec![CapabilityDefinition {
+                    name: capability.to_string(),
+                    description: String::new(),
+                    parameters: serde_json::json!({}),
+                }],
+            }
+        }
+    }
+
+    impl RemoteDevice for FakeDevice {
+        fn name(&self) -> &str {
+            self.device_name
+        }
+
+        fn capabilities(&self) -> &[CapabilityDefinition] {
+            &self.capabilities
+        }
+
+        fn invoke(&mut self, capability: &str, _arguments: &str) -> Outcome {
+            Outcome::Ok {
+                text: format!("handled by {}::{capability}", self.device_name),
+                mutated: false,
+            }
+        }
+    }
+
+    fn dispatcher_with_native_ping()
+    -> ToolDispatcher<TestComputer, NoWallClock, NoHttpFetcher, NoMcpClient, FakeDevice> {
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(Tools::Ping(PingTool::new()));
+        dispatcher
+    }
+
+    fn call(name: &str) -> ToolCall {
+        ToolCall {
+            name: name.to_string(),
+            arguments: "{}".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_bare_name_reaches_the_one_device_that_publishes_it() {
+        let mut dispatcher = dispatcher_with_native_ping();
+        dispatcher.register(Tools::Devices(vec![DeviceToolset::new(
+            FakeDevice::publishing("pc", "ping"),
+        )]));
+
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+
+        assert_eq!(outcome.text, "handled by pc::ping");
+    }
+
+    #[test]
+    fn a_prefixed_name_still_reaches_the_device() {
+        let mut dispatcher = dispatcher_with_native_ping();
+        dispatcher.register(Tools::Devices(vec![DeviceToolset::new(
+            FakeDevice::publishing("pc", "ping"),
+        )]));
+
+        let outcome = dispatcher.dispatch(call("pc_ping")).unwrap();
+
+        assert_eq!(outcome.text, "handled by pc::ping");
+    }
+
+    #[test]
+    fn a_bare_name_falls_back_to_the_native_tool_when_no_device_publishes_it() {
+        let mut dispatcher = dispatcher_with_native_ping();
+
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+
+        assert_ne!(outcome.text, "handled by pc::ping");
+    }
+
+    #[test]
+    fn an_ambiguous_bare_name_falls_back_to_the_native_tool() {
+        let mut dispatcher = dispatcher_with_native_ping();
+        dispatcher.register(Tools::Devices(vec![
+            DeviceToolset::new(FakeDevice::publishing("pc", "ping")),
+            DeviceToolset::new(FakeDevice::publishing("laptop", "ping")),
+        ]));
+
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+
+        assert_ne!(outcome.text, "handled by pc::ping");
+        assert_ne!(outcome.text, "handled by laptop::ping");
+    }
+
+    #[test]
+    fn a_device_registered_after_the_dispatcher_was_built_is_picked_up() {
+        let registry = Arc::new(DeviceRegistry::new());
+        let mut dispatcher = dispatcher_with_native_ping().with_device_registry(registry.clone());
+
+        // No device connected yet: the bare name falls back to the native.
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+        assert_ne!(outcome.text, "handled by pc::ping");
+
+        // The daemon connects mid-session, after the dispatcher was built.
+        registry.register("pc".to_string(), FakeDevice::publishing("pc", "ping"));
+
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+        assert_eq!(outcome.text, "handled by pc::ping");
+    }
+
+    #[test]
+    fn a_device_removed_from_the_registry_is_dropped() {
+        let registry = Arc::new(DeviceRegistry::new());
+        registry.register("pc".to_string(), FakeDevice::publishing("pc", "ping"));
+        let mut dispatcher = dispatcher_with_native_ping().with_device_registry(registry.clone());
+
+        registry.remove("pc");
+
+        let outcome = dispatcher.dispatch(call("ping")).unwrap();
+        assert_ne!(outcome.text, "handled by pc::ping");
+    }
+
+    #[test]
+    fn device_tools_reflects_currently_registered_devices() {
+        let mut dispatcher = dispatcher_with_native_ping();
+        assert!(dispatcher.device_tools().is_empty());
+
+        dispatcher.register(Tools::Devices(vec![DeviceToolset::new(
+            FakeDevice::publishing("pc", "ping"),
+        )]));
+
+        let names: Vec<String> = dispatcher
+            .device_tools()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect();
+
+        assert_eq!(names, vec!["pc_ping".to_string()]);
     }
 }

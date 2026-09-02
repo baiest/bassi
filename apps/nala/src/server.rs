@@ -166,7 +166,7 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
     events.emit(Event::Greeting {
         text: GREETING_TEXT.to_string(),
     });
-    let assistant = bootstrap::build_assistant(events, &devices);
+    let assistant = bootstrap::build_assistant(events, devices);
 
     // Deliberately not `bootstrap::install_cancel_signal` here: that
     // installs a Windows console handler which swallows Ctrl+C (so the
