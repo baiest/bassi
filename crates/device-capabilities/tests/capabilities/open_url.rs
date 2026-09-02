@@ -15,13 +15,15 @@ fn opens_a_valid_http_url() {
     let result = tool.execute(args);
 
     assert!(result.is_ok());
-    // `explorer`, not `cmd /C start` — the latter is denied by some Windows
-    // security configurations (Access is denied) even for a plain URL,
-    // while `explorer` uses the same ShellExecute path more reliably. See
-    // BAS-52.
+    // `rundll32 url.dll,FileProtocolHandler`, not `cmd /C start` or
+    // `explorer` — both of those were observed failing (denied, or opening
+    // File Explorer instead of the browser) on a machine where this
+    // rundll32 invocation, the standard scripted way to open a URL through
+    // Windows's own URL protocol handler, opened the default browser
+    // correctly. See BAS-52.
     assert_eq!(
         tool.computer.executed_command,
-        Some("explorer \"https://example.com\"".to_string())
+        Some("rundll32 url.dll,FileProtocolHandler \"https://example.com\"".to_string())
     );
 }
 
