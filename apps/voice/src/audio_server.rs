@@ -167,12 +167,23 @@ fn handle_connection(stream: TcpStream, transcriber: Arc<Transcriber>, session: 
         }
     };
 
-    // Connects to Nala (if not already) right away, so the greeting is
-    // waiting in the outbox as soon as this connection starts draining it
-    // below — not only once the client sends its first utterance.
-    session.ensure_connected();
+    send_greeting(&mut wire, &session);
 
     run_audio_session(&mut wire, transcriber.as_ref(), &session);
+}
+
+/// Sent directly on `wire`, before `run_audio_session`'s shared-outbox loop
+/// starts — the outbox is shared by every connection, so a second client
+/// connecting at the same time could otherwise steal this one's greeting
+/// (or vice versa). Every connecting client gets its own, straight from
+/// `VoiceSession::greeting_clip`. A send failure is only ever this one
+/// greeting missing its chance — never fatal to the connection.
+pub(crate) fn send_greeting<W: AudioWire>(wire: &mut W, session: &VoiceSession) {
+    if let Some(greeting) = session.greeting_clip()
+        && let Err(error) = wire.send(greeting)
+    {
+        eprintln!("Warning: could not send the greeting to the client: {error}");
+    }
 }
 
 /// Binds `addr` and serves one audio session per accepted connection on its
@@ -216,6 +227,7 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
+    use agent_protocol::{Event, ServerMessage};
     use stt::TranscribeError;
     use tts::PcmStream;
 
@@ -253,6 +265,14 @@ mod tests {
         sent: Vec<Vec<u8>>,
     }
 
+    fn scripted_wire() -> ScriptedWire {
+        ScriptedWire {
+            utterance: None,
+            fail_after: 10,
+            sent: Vec::new(),
+        }
+    }
+
     impl AudioWire for ScriptedWire {
         fn recv(&mut self) -> std::io::Result<WireEvent> {
             match self.utterance.take() {
@@ -268,6 +288,51 @@ mod tests {
             self.sent.push(wav);
             Ok(())
         }
+    }
+
+    /// Spawns a fake Nala that greets once and then goes quiet.
+    fn spawn_fake_nala_greeting_only(greeting: &'static str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let addr = listener.local_addr().expect("local addr").to_string();
+
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept a connection from voice");
+            let mut ws = tungstenite::accept(stream).expect("complete the WS handshake");
+            let json = serde_json::to_string(&ServerMessage::Event(Event::Greeting {
+                text: greeting.to_string(),
+            }))
+            .unwrap();
+            ws.send(Message::Text(json)).expect("send the greeting");
+            std::thread::sleep(Duration::from_secs(5));
+        });
+
+        addr
+    }
+
+    #[test]
+    fn each_connection_gets_its_own_greeting_sent_directly_on_its_wire() {
+        let nala_addr = spawn_fake_nala_greeting_only("hola");
+        let session = VoiceSession::new(
+            nala_addr,
+            Box::new(TemplateNarrator::new()),
+            Box::new(FakeSynth),
+        );
+
+        // Two separate connections (mirrors Android + nala-overlay both
+        // connecting) — each must get its own clip, straight on its own
+        // wire, not funneled through the shared outbox.
+        let mut first_wire = scripted_wire();
+        send_greeting(&mut first_wire, &session);
+        let mut second_wire = scripted_wire();
+        send_greeting(&mut second_wire, &session);
+
+        let expected = wav::encode_wav(
+            &(0.."hola".len() as i16).collect::<Vec<_>>(),
+            SAMPLE_RATE,
+            1,
+        );
+        assert_eq!(first_wire.sent, vec![expected.clone()]);
+        assert_eq!(second_wire.sent, vec![expected]);
     }
 
     #[test]

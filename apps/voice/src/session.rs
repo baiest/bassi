@@ -108,6 +108,12 @@ fn purge_expired(clips: &mut VecDeque<(Instant, Vec<u8>)>) {
 pub struct VoiceSession {
     nala_addr: String,
     client: Mutex<Option<NalaClient<TcpWire>>>,
+    // Nala sends its greeting only once, right when *its* connection opens
+    // — not once per phone/PC that connects to us. Cached here so every
+    // client that connects to this process can still get its own freshly
+    // synthesized clip (see `greeting_clip`), instead of only whichever
+    // client happened to be first.
+    greeting: Mutex<Option<String>>,
     narrator: Mutex<Box<dyn Narrator + Send>>,
     synth: Mutex<Box<dyn StreamSynthesizeSpeech + Send>>,
     outbox: Outbox,
@@ -122,6 +128,7 @@ impl VoiceSession {
         Self {
             nala_addr,
             client: Mutex::new(None),
+            greeting: Mutex::new(None),
             narrator: Mutex::new(narrator),
             synth: Mutex::new(synth),
             outbox: Outbox::new(),
@@ -132,12 +139,10 @@ impl VoiceSession {
         &self.outbox
     }
 
-    /// Connects to Nala if there's no live connection yet, greeting
-    /// whoever's about to listen along the way. Meant to be called as soon
-    /// as a client connects to this process — not just lazily on the first
-    /// utterance — so the greeting arrives right away instead of waiting
-    /// on the user to say something first. Idempotent: a call that finds a
-    /// connection already up does nothing.
+    /// Connects to Nala if there's no live connection yet, caching
+    /// whatever greeting it sends (see `greeting_clip`). Idempotent: a
+    /// call that finds a connection already up does nothing — Nala only
+    /// ever sends its greeting once, right when its own connection opens.
     pub fn ensure_connected(&self) {
         let mut client_slot = self.client.lock().unwrap();
         if client_slot.is_some() {
@@ -155,18 +160,11 @@ impl VoiceSession {
             }
         };
 
-        // Nala is the one greeting — synthesize it the same way as any
-        // other reply and queue it, so whichever phone connects next
-        // hears it. Best-effort: a connection that can't produce a
-        // greeting still proceeds to serve turns.
+        // Best-effort: a connection that can't produce a greeting still
+        // proceeds to serve turns.
         match client.recv_greeting() {
             Ok(greeting) if !greeting.is_empty() => {
-                match synthesize_to_wav(self.synth.lock().unwrap().as_ref(), &greeting) {
-                    Ok(clip) => self.outbox.push(clip),
-                    Err(error) => {
-                        eprintln!("Warning: could not synthesize the greeting: {error}")
-                    }
-                }
+                *self.greeting.lock().unwrap() = Some(greeting);
             }
             Ok(_) => {}
             Err(error) => {
@@ -175,6 +173,26 @@ impl VoiceSession {
         }
 
         *client_slot = Some(client);
+    }
+
+    /// Connects to Nala if needed, then synthesizes a fresh greeting clip
+    /// for *this* caller from the cached text — meant to be called once
+    /// per client connection (see `audio_server::handle_connection`) and
+    /// sent directly on that connection's own wire, not through the
+    /// shared `outbox`: the outbox has no notion of "which client asked
+    /// for this," so two clients connected at once could otherwise steal
+    /// each other's greeting. `None` if Nala gave no greeting, or the
+    /// connection couldn't be made at all.
+    pub fn greeting_clip(&self) -> Option<Vec<u8>> {
+        self.ensure_connected();
+        let greeting = self.greeting.lock().unwrap().clone()?;
+        match synthesize_to_wav(self.synth.lock().unwrap().as_ref(), &greeting) {
+            Ok(clip) => Some(clip),
+            Err(error) => {
+                eprintln!("Warning: could not synthesize the greeting: {error}");
+                None
+            }
+        }
     }
 
     /// Runs `text` as one turn on its own thread, so a phone connection
@@ -286,17 +304,43 @@ mod tests {
     }
 
     #[test]
-    fn ensure_connected_queues_the_greeting_without_any_turn_running() {
+    fn greeting_clip_returns_a_clip_synthesized_from_nalas_greeting() {
         let nala_addr = spawn_fake_nala_greeting_only("hola");
         let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
 
-        session.ensure_connected();
-
         let clip = session
-            .outbox()
-            .pop_blocking(Duration::from_secs(2))
-            .expect("the greeting clip should be queued");
+            .greeting_clip()
+            .expect("a greeting clip should be produced");
+
         assert_eq!(clip, wav_of_len("hola".len()));
+    }
+
+    #[test]
+    fn greeting_clip_never_touches_the_shared_outbox() {
+        let nala_addr = spawn_fake_nala_greeting_only("hola");
+        let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
+
+        session.greeting_clip();
+
+        // The greeting must be handed straight back to the caller, not
+        // queued where some other connection could pop it instead.
+        assert!(session.outbox().try_pop().is_none());
+    }
+
+    #[test]
+    fn every_connecting_client_gets_its_own_greeting_clip() {
+        let nala_addr = spawn_fake_nala_greeting_only("hola");
+        let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
+
+        // Simulates two separate clients (e.g. Android and nala-overlay)
+        // each connecting and asking for their own greeting — Nala itself
+        // is only contacted once (`spawn_fake_nala_greeting_only` accepts
+        // a single connection), but each caller still gets a clip.
+        let first = session.greeting_clip();
+        let second = session.greeting_clip();
+
+        assert_eq!(first, Some(wav_of_len("hola".len())));
+        assert_eq!(second, Some(wav_of_len("hola".len())));
     }
 
     #[test]
@@ -305,12 +349,13 @@ mod tests {
         let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
 
         session.ensure_connected();
-        session.outbox().try_pop(); // drain the greeting
+        let cached_after_first = session.greeting.lock().unwrap().clone();
         session.ensure_connected();
 
-        // A second greeting would mean it reconnected instead of noticing
-        // it was already connected.
-        assert!(session.outbox().try_pop().is_none());
+        // A reconnect (or a lost greeting) would show up as the cached
+        // text changing or disappearing.
+        assert_eq!(session.greeting.lock().unwrap().clone(), cached_after_first);
+        assert_eq!(cached_after_first, Some("hola".to_string()));
     }
 
     fn wav_of_len(sample_count: usize) -> Vec<u8> {
