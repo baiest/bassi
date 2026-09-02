@@ -15,9 +15,13 @@ fn opens_a_valid_http_url() {
     let result = tool.execute(args);
 
     assert!(result.is_ok());
+    // `explorer`, not `cmd /C start` — the latter is denied by some Windows
+    // security configurations (Access is denied) even for a plain URL,
+    // while `explorer` uses the same ShellExecute path more reliably. See
+    // BAS-52.
     assert_eq!(
         tool.computer.executed_command,
-        Some("start \"\" \"https://example.com\"".to_string())
+        Some("explorer \"https://example.com\"".to_string())
     );
 }
 
