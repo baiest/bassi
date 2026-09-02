@@ -76,8 +76,12 @@ impl<C: Computer> Capability for OpenUrlTool<C> {
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         validate_url(&args.url)?;
 
+        // `explorer <url>` rather than `cmd /C start "" <url>`: both hand
+        // off to ShellExecute and open the user's default browser, but
+        // `start` has been observed denied ("Access is denied") under some
+        // Windows security configurations that `explorer` isn't subject to.
         self.computer
-            .execute_command(&format!("start \"\" \"{}\"", args.url), self.timeout)?;
+            .execute_command(&format!("explorer \"{}\"", args.url), self.timeout)?;
 
         Ok(format!("Opened {} in the default browser.", args.url))
     }
