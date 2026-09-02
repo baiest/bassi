@@ -133,7 +133,11 @@ where
                 };
 
                 match transcriber.transcribe(&samples) {
-                    Ok(text) if !text.trim().is_empty() => session.submit(text.trim().to_string()),
+                    Ok(text) if !text.trim().is_empty() => {
+                        let text = text.trim().to_string();
+                        println!("[HEARD] {text}");
+                        session.submit(text);
+                    }
                     Ok(_) => {}
                     Err(error) => {
                         eprintln!("Warning: could not transcribe incoming audio: {error}");
@@ -162,6 +166,11 @@ fn handle_connection(stream: TcpStream, transcriber: Arc<Transcriber>, session: 
             return;
         }
     };
+
+    // Connects to Nala (if not already) right away, so the greeting is
+    // waiting in the outbox as soon as this connection starts draining it
+    // below — not only once the client sends its first utterance.
+    session.ensure_connected();
 
     run_audio_session(&mut wire, transcriber.as_ref(), &session);
 }
