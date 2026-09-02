@@ -132,6 +132,51 @@ impl VoiceSession {
         &self.outbox
     }
 
+    /// Connects to Nala if there's no live connection yet, greeting
+    /// whoever's about to listen along the way. Meant to be called as soon
+    /// as a client connects to this process — not just lazily on the first
+    /// utterance — so the greeting arrives right away instead of waiting
+    /// on the user to say something first. Idempotent: a call that finds a
+    /// connection already up does nothing.
+    pub fn ensure_connected(&self) {
+        let mut client_slot = self.client.lock().unwrap();
+        if client_slot.is_some() {
+            return;
+        }
+
+        let mut client = match TcpWire::connect(&self.nala_addr) {
+            Ok(wire) => NalaClient::new(wire),
+            Err(error) => {
+                eprintln!(
+                    "Error: could not connect to nala at {}: {error}",
+                    self.nala_addr
+                );
+                return;
+            }
+        };
+
+        // Nala is the one greeting — synthesize it the same way as any
+        // other reply and queue it, so whichever phone connects next
+        // hears it. Best-effort: a connection that can't produce a
+        // greeting still proceeds to serve turns.
+        match client.recv_greeting() {
+            Ok(greeting) if !greeting.is_empty() => {
+                match synthesize_to_wav(self.synth.lock().unwrap().as_ref(), &greeting) {
+                    Ok(clip) => self.outbox.push(clip),
+                    Err(error) => {
+                        eprintln!("Warning: could not synthesize the greeting: {error}")
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("Warning: could not receive the greeting from nala: {error}")
+            }
+        }
+
+        *client_slot = Some(client);
+    }
+
     /// Runs `text` as one turn on its own thread, so a phone connection
     /// dropping mid-turn doesn't cut the turn short — it keeps running and
     /// queues its clips to the outbox regardless of who's listening.
@@ -146,41 +191,13 @@ impl VoiceSession {
     /// turn serializes turns against each other, which is what we want:
     /// one `Assistant` on the Nala side, one turn at a time.
     fn run_turn(&self, text: &str) {
+        self.ensure_connected();
+
         let mut client_slot = self.client.lock().unwrap();
-        if client_slot.is_none() {
-            let mut client = match TcpWire::connect(&self.nala_addr) {
-                Ok(wire) => NalaClient::new(wire),
-                Err(error) => {
-                    eprintln!(
-                        "Error: could not connect to nala at {}: {error}",
-                        self.nala_addr
-                    );
-                    return;
-                }
-            };
-
-            // Nala is the one greeting — synthesize it the same way as any
-            // other reply and queue it, so whichever phone connects next
-            // hears it. Best-effort: a connection that can't produce a
-            // greeting still proceeds to serve turns.
-            match client.recv_greeting() {
-                Ok(greeting) if !greeting.is_empty() => {
-                    match synthesize_to_wav(self.synth.lock().unwrap().as_ref(), &greeting) {
-                        Ok(clip) => self.outbox.push(clip),
-                        Err(error) => {
-                            eprintln!("Warning: could not synthesize the greeting: {error}")
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("Warning: could not receive the greeting from nala: {error}")
-                }
-            }
-
-            *client_slot = Some(client);
-        }
-        let client = client_slot.as_mut().expect("just ensured connected");
+        let Some(client) = client_slot.as_mut() else {
+            // `ensure_connected` already logged why.
+            return;
+        };
 
         let outbox = &self.outbox;
         let narrator = &self.narrator;
@@ -217,6 +234,89 @@ impl VoiceSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+
+    use agent_protocol::ServerMessage;
+    use tts::{PcmStream, SpeechError};
+    use tungstenite::Message;
+
+    struct FakeSynth;
+
+    impl StreamSynthesizeSpeech for FakeSynth {
+        fn synthesize_stream(&self, text: &str) -> Result<PcmStream, SpeechError> {
+            let (tx, rx) = mpsc::channel();
+            let samples: Vec<i16> = (0..text.len() as i16).collect();
+            tx.send(Ok(samples)).unwrap();
+            Ok(PcmStream {
+                sample_rate: 16_000,
+                channels: 1,
+                chunks: rx,
+            })
+        }
+    }
+
+    struct SilentNarrator;
+    impl Narrator for SilentNarrator {
+        fn narrate(&mut self, _event: &Event) -> Option<String> {
+            None
+        }
+    }
+
+    /// Spawns a fake Nala that sends only its greeting and then goes
+    /// quiet, and returns the address to connect to.
+    fn spawn_fake_nala_greeting_only(greeting: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let addr = listener.local_addr().expect("local addr").to_string();
+
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept a connection from voice");
+            let mut ws = tungstenite::accept(stream).expect("complete the WS handshake");
+            let json = serde_json::to_string(&ServerMessage::Event(Event::Greeting {
+                text: greeting.to_string(),
+            }))
+            .unwrap();
+            ws.send(Message::Text(json)).expect("send the greeting");
+            // Keep the connection open so the client isn't surprised by an
+            // immediate close.
+            thread::sleep(Duration::from_secs(5));
+        });
+
+        addr
+    }
+
+    #[test]
+    fn ensure_connected_queues_the_greeting_without_any_turn_running() {
+        let nala_addr = spawn_fake_nala_greeting_only("hola");
+        let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
+
+        session.ensure_connected();
+
+        let clip = session
+            .outbox()
+            .pop_blocking(Duration::from_secs(2))
+            .expect("the greeting clip should be queued");
+        assert_eq!(clip, wav_of_len("hola".len()));
+    }
+
+    #[test]
+    fn ensure_connected_is_a_no_op_once_already_connected() {
+        let nala_addr = spawn_fake_nala_greeting_only("hola");
+        let session = VoiceSession::new(nala_addr, Box::new(SilentNarrator), Box::new(FakeSynth));
+
+        session.ensure_connected();
+        session.outbox().try_pop(); // drain the greeting
+        session.ensure_connected();
+
+        // A second greeting would mean it reconnected instead of noticing
+        // it was already connected.
+        assert!(session.outbox().try_pop().is_none());
+    }
+
+    fn wav_of_len(sample_count: usize) -> Vec<u8> {
+        let samples: Vec<i16> = (0..sample_count as i16).collect();
+        crate::wav::encode_wav(&samples, 16_000, 1)
+    }
 
     #[test]
     fn pops_clips_in_fifo_order() {
