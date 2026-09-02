@@ -1,4 +1,5 @@
 use crate::ports::llm::ToolCall;
+use crate::ports::tool::ToolDefinition;
 
 /// What running a tool produced: text for the model to read, plus any
 /// images (base64) it should see, e.g. from a vision-capable MCP tool.
@@ -33,4 +34,13 @@ pub trait ToolDispatcher {
     fn dispatch(&mut self, tool_call: ToolCall) -> Result<Self::Output, Self::Error>;
 
     fn get_context(&mut self) -> Result<String, Self::Error>;
+
+    /// Tool definitions for every currently-connected device, re-derived
+    /// fresh each call so a device connecting or disconnecting mid-session
+    /// is picked up without reconnecting. Defaulted to empty so dispatchers
+    /// with no notion of devices (most test doubles) don't have to
+    /// implement it.
+    fn device_tools(&mut self) -> Vec<ToolDefinition> {
+        Vec::new()
+    }
 }

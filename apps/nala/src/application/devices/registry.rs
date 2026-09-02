@@ -3,16 +3,12 @@ use std::sync::Mutex;
 
 /// Every device currently connected to Nala, keyed by `device_id`. Shared
 /// between the device server's accept loop (which registers/removes
-/// devices as connections come and go) and `bootstrap`, which snapshots it
-/// once per turn-client connection to build that connection's
-/// `Tools::Devices`.
-///
-/// A snapshot is a point-in-time copy: a device connecting or disconnecting
-/// mid-turn-client-connection isn't picked up until that connection is
-/// re-established, the same limitation Nala's MCP tools already have (MCP
-/// servers are connected once at startup, not rediscovered per turn). This
-/// keeps the design simple; live tool-list updates are future work, not
-/// needed for the vertical slice.
+/// devices as connections come and go) and the `ToolDispatcher`
+/// (`with_device_registry`), which re-snapshots it on every turn — so a
+/// device connecting or disconnecting mid-session is reflected on the very
+/// next turn, no reconnect needed. MCP tools still don't get this (servers
+/// are connected once at startup, not rediscovered per turn); that
+/// limitation is unrelated to this registry.
 pub struct DeviceRegistry<D: Clone> {
     devices: Mutex<HashMap<String, D>>,
 }

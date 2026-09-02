@@ -5,6 +5,7 @@ use nala::ports::device::RemoteDevice;
 /// scripted, and which records the last capability/arguments it was asked
 /// to invoke — enough to test `DeviceToolset` and the dispatcher's routing
 /// without a real connection.
+#[derive(Clone)]
 pub struct FakeDevice {
     name: String,
     capabilities: Vec<CapabilityDefinition>,
