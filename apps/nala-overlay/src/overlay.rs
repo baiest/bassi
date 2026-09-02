@@ -8,8 +8,11 @@ use tungstenite::WebSocket;
 use tungstenite::stream::MaybeTlsStream;
 
 use nala_overlay::amplitude::amplitude_from_samples;
-use nala_overlay::color::status_color;
+use nala_overlay::color::{accent_color, glow_color, status_color};
+use nala_overlay::config;
+use nala_overlay::motion;
 use nala_overlay::playback::{self, ClipPlayer};
+use nala_overlay::scene::{self, Point3};
 use nala_overlay::status::Status;
 use nala_overlay::voice_client::{VoiceConnection, run_clip_loop};
 
@@ -153,8 +156,167 @@ fn record_and_send(shared: Arc<Shared>) {
     shared.set_status(Status::Idle);
 }
 
+/// Fraction of the window's half-size reserved as empty margin around the
+/// scene, so the core's halo never touches (and gets clipped by) the
+/// window edge even at full amplitude.
+const SAFE_MARGIN: f32 = 0.14;
+
+/// How much louder amplitude inflates the core's radius, as a fraction of
+/// the core's resting radius. At `pulse == 1.0` the core is
+/// `1.0 + PULSE_GAIN` times its resting size — high enough that speaking
+/// produces an obviously bigger core, not just a few pixels of wobble.
+const PULSE_GAIN: f32 = 1.2;
+
+/// The core's resting radius, as a fraction of the scene radius. Kept
+/// small on purpose: `CORE_RADIUS_FRACTION * (1.0 + PULSE_GAIN) *
+/// HALO_RADIUS_FACTOR` must stay under 1.0, or the halo would clip against
+/// `scene_radius`'s margin at full amplitude.
+const CORE_RADIUS_FRACTION: f32 = 0.28;
+
+/// The halo's radius, as a multiple of the (amplitude-inflated) core
+/// radius.
+const HALO_RADIUS_FACTOR: f32 = 1.6;
+
+/// How much amplitude also expands the sphere/ring point cloud, as a
+/// fraction of `scene_radius` — smaller than `PULSE_GAIN` since
+/// `scene_radius` has less headroom (`SAFE_MARGIN`) to spend than the core
+/// does.
+const SCENE_PULSE_GAIN: f32 = 0.1;
+
+/// How quickly the displayed amplitude catches up to the real one — small
+/// enough to smooth out per-window jitter, large enough to still feel
+/// responsive to speech.
+const AMPLITUDE_HALF_LIFE: f32 = 0.08;
+
+/// Radians/second the sphere and rings rotate around Y at rest.
+const YAW_SPEED: f32 = 0.35;
+
+/// Radians/second the sphere and rings rotate around X at rest — slower
+/// than yaw so the tumble doesn't look mechanical.
+const PITCH_SPEED: f32 = 0.13;
+
+/// Smallest on-screen radius (in points) a sphere/ring point is drawn at,
+/// so far points stay visible instead of anti-aliasing away to nothing.
+const MIN_POINT_RADIUS: f32 = 1.0;
+
+/// Largest on-screen radius (in points) a sphere/ring point is drawn at.
+const MAX_POINT_RADIUS: f32 = 2.6;
+
+/// How many egui points of scroll map to one point of window size change.
+const SCROLL_SENSITIVITY: f32 = 0.5;
+
+/// How often the current window size is written to disk while the user is
+/// actively scrolling to resize — anything shorter just wears the disk for
+/// no visible benefit.
+const SIZE_SAVE_INTERVAL: Duration = Duration::from_millis(500);
+
 struct OverlayApp {
     shared: Arc<Shared>,
+    sphere: Vec<Point3>,
+    rings: Vec<Vec<Point3>>,
+    smoothed_amplitude: f32,
+    yaw: f32,
+    pitch: f32,
+    elapsed: f32,
+    size: f32,
+    last_size_save: Option<std::time::Instant>,
+}
+
+impl OverlayApp {
+    fn new(shared: Arc<Shared>, size: f32) -> Self {
+        Self {
+            shared,
+            sphere: scene::sphere_points(scene::SPHERE_POINTS),
+            rings: scene::RING_TILTS
+                .iter()
+                .map(|&tilt| scene::ring_points(scene::RING_POINTS, tilt))
+                .collect(),
+            smoothed_amplitude: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+            elapsed: 0.0,
+            size,
+            last_size_save: None,
+        }
+    }
+
+    /// Applies pending scroll input as a window resize, anchored on the
+    /// window's center rather than its top-left corner. Persists the new
+    /// size to disk, but no more often than `SIZE_SAVE_INTERVAL` so a burst
+    /// of scroll events doesn't hammer the filesystem.
+    fn handle_resize(&mut self, ctx: &egui::Context) {
+        let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+        if scroll == 0.0 {
+            return;
+        }
+
+        let previous_size = self.size;
+        self.size =
+            (self.size + scroll * SCROLL_SENSITIVITY).clamp(config::MIN_SIZE, config::MAX_SIZE);
+        if self.size == previous_size {
+            return;
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            self.size, self.size,
+        )));
+
+        // Growing/shrinking from the center, not the top-left corner, needs
+        // the window's current on-screen position — best-effort, since not
+        // every platform reports it every frame.
+        if let Some(outer_rect) = ctx.input(|i| i.viewport().outer_rect) {
+            let delta = (self.size - previous_size) / 2.0;
+            let new_pos = outer_rect.min - egui::vec2(delta, delta);
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(new_pos));
+        }
+
+        let should_save = self
+            .last_size_save
+            .is_none_or(|last| last.elapsed() >= SIZE_SAVE_INTERVAL);
+        if should_save {
+            config::save(self.size);
+            self.last_size_save = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Draws one layer of points (sphere or ring), each rotated by the
+    /// current yaw/pitch, projected, and depth-sorted so nearer points
+    /// paint over farther ones.
+    fn draw_points(
+        &self,
+        painter: &egui::Painter,
+        center: egui::Pos2,
+        radius: f32,
+        color: egui::Color32,
+    ) {
+        let projected: Vec<_> = self
+            .sphere
+            .iter()
+            .chain(self.rings.iter().flatten())
+            .map(|&p| scene::rotate(p, self.yaw, self.pitch))
+            .map(|p| scene::project(p, radius, scene::PERSPECTIVE))
+            .collect();
+
+        for point in scene::depth_sorted(projected) {
+            // Farther points (scale < 1.0) shrink and fade; nearer points
+            // (scale > 1.0) grow slightly — this is what reads as "3D"
+            // rather than a flat ring of dots.
+            let point_radius =
+                (MIN_POINT_RADIUS * point.scale).clamp(MIN_POINT_RADIUS, MAX_POINT_RADIUS);
+            let alpha = ((point.scale - 0.5).clamp(0.0, 1.0) * 255.0) as u8;
+            let point_color = egui::Color32::from_rgba_unmultiplied(
+                color.r(),
+                color.g(),
+                color.b(),
+                alpha.max(40),
+            );
+            painter.circle_filled(
+                center + egui::vec2(point.pos.0, point.pos.1),
+                point_radius,
+                point_color,
+            );
+        }
+    }
 }
 
 impl eframe::App for OverlayApp {
@@ -165,18 +327,42 @@ impl eframe::App for OverlayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let status = *self.shared.status.lock().unwrap();
         let amplitude = *self.shared.amplitude.lock().unwrap();
-        let color = status_color(status);
+        let core_color = status_color(status);
+        let ring_color = accent_color(status);
+        let halo_color = glow_color(status);
+
+        let dt = ctx.input(|i| i.stable_dt).min(0.1);
+        self.elapsed += dt;
+        self.smoothed_amplitude =
+            motion::smooth(self.smoothed_amplitude, amplitude, dt, AMPLITUDE_HALF_LIFE);
+        self.yaw += YAW_SPEED * dt;
+        self.pitch = (PITCH_SPEED * self.elapsed).sin() * 0.3;
+
+        self.handle_resize(ctx);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
                 let center = rect.center();
-                let base_radius = rect.width().min(rect.height()) / 2.0 - 4.0;
-                // The circle grows with real amplitude while listening or
-                // speaking — 0.0 the rest of the time leaves it at rest.
-                let radius = base_radius * (1.0 + amplitude * 0.3);
-                ui.painter().circle_filled(center, radius, color);
+                let scene_radius = rect.width().min(rect.height()) / 2.0 * (1.0 - SAFE_MARGIN);
+
+                // In `Idle`, breathe gently instead of sitting frozen; while
+                // listening/speaking the real amplitude drives the pulse
+                // instead.
+                let pulse = if status == Status::Idle {
+                    motion::breathe(self.elapsed) * 0.5
+                } else {
+                    self.smoothed_amplitude
+                };
+                let core_radius = scene_radius * CORE_RADIUS_FRACTION * (1.0 + pulse * PULSE_GAIN);
+                let points_radius = scene_radius * (1.0 + pulse * SCENE_PULSE_GAIN);
+
+                let painter = ui.painter();
+
+                self.draw_points(painter, center, points_radius, ring_color);
+                painter.circle_filled(center, core_radius * HALO_RADIUS_FACTOR, halo_color);
+                painter.circle_filled(center, core_radius, core_color);
 
                 let response = ui.interact(
                     rect,
@@ -204,7 +390,11 @@ impl eframe::App for OverlayApp {
                 }
             });
 
-        ctx.request_repaint_after(Duration::from_millis(33));
+        // Continuous repaint, paced by the compositor, instead of a fixed
+        // ~30 FPS sleep — combined with `smooth`'s framerate-independent
+        // easing, this is what makes the animation read as fluid instead of
+        // stepping between amplitude windows.
+        ctx.request_repaint();
     }
 }
 
@@ -219,8 +409,11 @@ pub fn run() -> eframe::Result<()> {
     ));
     spawn_connection_manager(Arc::clone(&shared), voice_addr, Arc::clone(&player));
 
+    let size = config::load();
+
     let viewport = egui::ViewportBuilder::default()
-        .with_inner_size([80.0, 80.0])
+        .with_inner_size([size, size])
+        .with_resizable(false)
         .with_decorations(false)
         .with_transparent(true)
         .with_window_level(egui::WindowLevel::AlwaysOnTop);
@@ -233,6 +426,6 @@ pub fn run() -> eframe::Result<()> {
     eframe::run_native(
         "Nala Overlay",
         options,
-        Box::new(|_cc| Ok(Box::new(OverlayApp { shared }))),
+        Box::new(move |_cc| Ok(Box::new(OverlayApp::new(shared, size)))),
     )
 }
