@@ -76,12 +76,16 @@ impl<C: Computer> Capability for OpenUrlTool<C> {
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         validate_url(&args.url)?;
 
-        // `explorer <url>` rather than `cmd /C start "" <url>`: both hand
-        // off to ShellExecute and open the user's default browser, but
-        // `start` has been observed denied ("Access is denied") under some
-        // Windows security configurations that `explorer` isn't subject to.
-        self.computer
-            .execute_command(&format!("explorer \"{}\"", args.url), self.timeout)?;
+        // `rundll32 url.dll,FileProtocolHandler <url>` — the standard
+        // scripted way to invoke Windows's URL protocol handler directly.
+        // Both `cmd /C start "" <url>` and `explorer <url>` were observed
+        // failing on a real machine (the former denied outright, the
+        // latter opening File Explorer instead of the browser); this is
+        // the one that reliably opened the default browser there.
+        self.computer.execute_command(
+            &format!("rundll32 url.dll,FileProtocolHandler \"{}\"", args.url),
+            self.timeout,
+        )?;
 
         Ok(format!("Opened {} in the default browser.", args.url))
     }
