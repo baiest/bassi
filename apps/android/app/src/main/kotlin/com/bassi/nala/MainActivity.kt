@@ -59,6 +59,14 @@ class MainActivity : AppCompatActivity() {
                     setTurnStatus(getString(R.string.playing_reply))
                 }
             }
+            service.onPlaybackFinished = {
+                runOnUi {
+                    if (!recording) {
+                        coreView.status = CoreStatus.IDLE
+                        setTurnStatus("")
+                    }
+                }
+            }
             updateStatusUi(service.status)
         }
 
@@ -200,6 +208,7 @@ class MainActivity : AppCompatActivity() {
         if (bound) {
             nalaService?.onStatusChanged = null
             nalaService?.onClipReceived = null
+            nalaService?.onPlaybackFinished = null
             unbindService(serviceConnection)
             bound = false
         }

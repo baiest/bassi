@@ -16,10 +16,22 @@ import kotlin.concurrent.thread
  */
 class ClipPlayer(private val context: Context) {
     private val queue = LinkedBlockingQueue<ByteArray>()
+
+    /**
+     * Fired (off the main thread) once playback catches up to an empty
+     * queue — i.e. every clip enqueued so far has finished. A reply can
+     * arrive as several clips (narration, then the final answer), so this
+     * only fires after the last one, not after each individual clip.
+     */
+    var onQueueDrained: (() -> Unit)? = null
+
     private val worker = thread(name = "nala-playback") {
         try {
             while (true) {
                 playBlocking(queue.take())
+                if (queue.isEmpty()) {
+                    onQueueDrained?.invoke()
+                }
             }
         } catch (_: InterruptedException) {
             // release() was called — exit quietly.
