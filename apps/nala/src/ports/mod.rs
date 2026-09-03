@@ -4,6 +4,7 @@ pub mod device;
 pub mod events;
 pub mod http;
 pub mod llm;
+pub mod memory;
 pub mod token_counter;
 pub mod tool;
 pub mod tool_dispatcher;

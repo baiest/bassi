@@ -3,5 +3,6 @@ pub mod assistant;
 pub mod context_budget;
 pub mod devices;
 pub mod loop_limits;
+pub mod memory;
 pub mod tools;
 pub mod transcript;

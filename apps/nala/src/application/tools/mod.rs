@@ -6,6 +6,7 @@ pub mod get_weather;
 pub mod mcp_toolset;
 pub mod ping;
 pub mod registry;
+pub mod remember;
 pub mod web_search;
 
 // Re-exported so existing `application::tools::ToolDefinition` call sites

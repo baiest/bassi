@@ -8,12 +8,14 @@ use device_capabilities::capabilities::open_app::OpenAppTool;
 use device_capabilities::capabilities::open_url::OpenUrlTool;
 use device_capabilities::capabilities::volume::VolumeTool;
 use mcp::McpToolResult;
+use nala::adapters::memory::in_memory::InMemoryMemoryStore;
 use nala::application::tools::device_toolset::DeviceToolset;
 use nala::application::tools::dispatcher::{
     NoHttpFetcher, NoMcpClient, NoWallClock, ToolDispatcher, ToolDispatcherError, Tools,
 };
 use nala::application::tools::mcp_toolset::McpToolset;
 use nala::application::tools::ping::PingTool;
+use nala::application::tools::remember::RememberTool;
 use nala::ports::llm::ToolCall;
 use nala::ports::tool_dispatcher::ToolDispatcher as _;
 
@@ -173,6 +175,24 @@ fn does_not_mark_ping_outcome_as_mutated() {
     let outcome = dispatcher.dispatch(tool_call).unwrap();
 
     assert!(!outcome.mutated);
+}
+
+#[test]
+fn routes_a_remember_call_to_the_remember_tool_and_marks_it_mutated() {
+    let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+    dispatcher.register(Tools::Remember(RememberTool::new(Box::new(
+        InMemoryMemoryStore::new(),
+    ))));
+
+    let tool_call = ToolCall {
+        name: "remember".to_string(),
+        arguments: r#"{"key":"nombre","value":"Juan"}"#.to_string(),
+    };
+
+    let outcome = dispatcher.dispatch(tool_call).unwrap();
+
+    assert!(outcome.mutated);
+    assert!(outcome.text.contains("nombre"));
 }
 
 #[test]
