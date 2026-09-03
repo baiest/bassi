@@ -6,11 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -111,9 +114,38 @@ class MainActivity : AppCompatActivity() {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        requestBatteryOptimizationExemption()
+
         val serviceIntent = Intent(this, NalaService::class.java)
         ContextCompat.startForegroundService(this, serviceIntent)
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    /**
+     * Without this exemption, several OEM battery managers (MIUI, Samsung,
+     * OnePlus, ...) kill background network connections — including a
+     * foreground service's — once the screen has been off for a while,
+     * regardless of the wake/wifi locks [NalaService] holds. This is the
+     * one system-level cause of the "disconnects when the screen turns
+     * off" complaint that the app genuinely can't route around: it can
+     * only ask. Fires the standard system dialog at most once per app
+     * install — a no-op on subsequent launches once granted, and silently
+     * skipped if the user declines rather than nagging every time.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
+
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName"),
+        )
+        try {
+            startActivity(intent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            // Some OEM ROMs strip this system dialog; nothing more to do
+            // here besides letting the user disable it manually in Settings.
+        }
     }
 
     private fun openSettings() {

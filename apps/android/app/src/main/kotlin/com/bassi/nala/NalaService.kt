@@ -168,12 +168,18 @@ class NalaService : Service() {
         reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
     }
 
+    // `dataSync`, not `mediaPlayback`: on API 34+ the system enforces that a
+    // `mediaPlayback`-typed foreground service is actually playing media,
+    // and can kill a service that claims that type while idle — which is
+    // most of this service's life, since it's mostly just holding the
+    // socket open. `dataSync` matches what it actually does: maintain a
+    // live data connection and receive replies over it.
     private fun startForegroundWithNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
             startForeground(NOTIFICATION_ID, buildNotification())
