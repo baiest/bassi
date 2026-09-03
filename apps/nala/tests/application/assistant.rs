@@ -2,6 +2,7 @@ use device_capabilities::Capability;
 use device_capabilities::capabilities::execute_command::ExecuteCommandTool;
 use nala::{
     adapters::events::console::ConsoleEventSink,
+    adapters::memory::in_memory::InMemoryMemoryStore,
     adapters::metrics::csv_sink::CsvMetricsSink,
     application::{
         assistant::{Assistant, AssistantError},
@@ -188,6 +189,56 @@ fn puts_the_invariant_computer_context_before_the_transcript() {
     assert!(
         context_index < user_index,
         "expected computer context before the transcript, got: {messages:#?}"
+    );
+}
+
+#[test]
+fn injects_remembered_facts_as_a_system_message_before_the_user_message() {
+    let llm = RecordsMessagesLlm::new();
+    let received = llm.received.clone();
+
+    let mut memory = InMemoryMemoryStore::new();
+    nala::ports::memory::MemoryStore::remember(
+        &mut memory,
+        "nombre".to_string(),
+        "Juan".to_string(),
+    )
+    .unwrap();
+
+    let mut assistant = assistant_with(llm, FakeComputer::new()).with_memory(Box::new(memory));
+    assistant.process("what time is it?").unwrap();
+
+    let messages = received.lock().unwrap()[0].clone();
+    let memory_index = messages
+        .iter()
+        .position(|message| message.role == "system" && message.content.contains("Juan"))
+        .expect("a system message mentioning the remembered fact");
+    let user_index = messages
+        .iter()
+        .position(|message| message.role == "user")
+        .expect("the user's message");
+
+    assert!(
+        memory_index < user_index,
+        "expected remembered facts before the transcript, got: {messages:#?}"
+    );
+}
+
+#[test]
+fn does_not_add_a_memory_message_when_nothing_is_remembered() {
+    let llm = RecordsMessagesLlm::new();
+    let received = llm.received.clone();
+
+    let mut assistant =
+        assistant_with(llm, FakeComputer::new()).with_memory(Box::new(InMemoryMemoryStore::new()));
+    assistant.process("what time is it?").unwrap();
+
+    let messages = received.lock().unwrap()[0].clone();
+    assert!(
+        !messages
+            .iter()
+            .any(|message| message.role == "system" && message.content.contains("Remembered")),
+        "expected no memory system message when there are no facts, got: {messages:#?}"
     );
 }
 

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 // their own construction code. Anything that needs a different one (tests,
 // mainly) overrides it with `with_clock` / `with_token_counter`.
 use crate::adapters::clock::system::SystemClock;
+use crate::adapters::memory::in_memory::InMemoryMemoryStore;
 use crate::adapters::token_counter::heuristic::HeuristicTokenCounter;
 use crate::application::agent_loop::TaskState;
 use crate::application::context_budget::ContextBudget;
@@ -17,6 +18,7 @@ use crate::ports::cancellation::{CancelSignal, NeverCancelled};
 use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
 use crate::ports::llm::{Llm, Message, ToolCall};
+use crate::ports::memory::MemoryStore;
 use crate::ports::token_counter::TokenCounter;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
 
@@ -33,6 +35,7 @@ You are Nala, a general-purpose assistant. You have tools available — includin
 - For factual or current-events questions, use web_search (and fetch_url to read a promising result in detail) instead of guessing from memory. Do NOT use execute_command for that.
 - The open_url, open_app, and volume capabilities (as open_url/open_app/volume, or prefixed with a connected device's name, e.g. pc_open_url) act directly on a real machine (opening a real URL/app, changing real system volume). Use them directly when the user asks for that action — unlike execute_command, they are narrowly scoped and safe by design, so there's no need to ask for confirmation before calling them. Only one form of each capability is ever offered at a time — call it exactly as listed in your tools, whichever name that is.
 - If you aren't sure of the exact name of the app the user wants opened, call the list_apps capability first to look up its real installed name, then pass that confirmed name to open_app — don't guess.
+- If the user shares a durable fact about themselves worth keeping for future conversations (their name, a preference, where they live, ...), call remember with a short key and the value. If they later correct a fact you already know, call remember again with the same key — it replaces the old value.
 </core_rules>
 
 <verification>
@@ -63,6 +66,13 @@ pub struct Assistant<L, D, E> {
     pub(crate) token_counter: Box<dyn TokenCounter>,
     pub(crate) budget: ContextBudget,
     pub(crate) planning_enabled: bool,
+    /// Durable facts taught via the `remember` tool, injected fresh into
+    /// the prompt each turn (see `agent_loop::build_prompt_messages`) —
+    /// separate from `transcript`, which only ever holds conversation text.
+    /// Defaults to an in-memory store so a caller that doesn't opt into
+    /// persistence (most tests) doesn't need a real file; `bootstrap.rs`
+    /// overrides it with a `FileMemoryStore` via `with_memory`.
+    pub(crate) memory: Box<dyn MemoryStore>,
     /// Identity and per-call counters for the task currently in
     /// `process()`. Reset at the start of every call.
     pub(crate) current_task: TaskState,
@@ -110,6 +120,7 @@ where
             token_counter: Box::new(HeuristicTokenCounter::new()),
             budget: ContextBudget::from_env(),
             planning_enabled: true,
+            memory: Box::new(InMemoryMemoryStore::new()),
             current_task: TaskState::default(),
         }
     }
@@ -141,6 +152,11 @@ where
 
     pub fn with_budget(mut self, budget: ContextBudget) -> Self {
         self.budget = budget;
+        self
+    }
+
+    pub fn with_memory(mut self, memory: Box<dyn MemoryStore>) -> Self {
+        self.memory = memory;
         self
     }
 

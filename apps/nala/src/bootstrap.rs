@@ -23,6 +23,7 @@ use serde::Deserialize;
 use crate::adapters::cancellation::console::CtrlCCancelSignal;
 use crate::adapters::http::reqwest::ReqwestFetcher;
 use crate::adapters::llm::ollama::OllamaLlm;
+use crate::adapters::memory::file::FileMemoryStore;
 use crate::adapters::wall_clock::system::SystemWallClock;
 use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
@@ -34,6 +35,7 @@ use crate::application::tools::get_weather::GetWeatherTool;
 use crate::application::tools::mcp_toolset::McpToolset;
 use crate::application::tools::ping::PingTool;
 use crate::application::tools::registry::ToolRegistry;
+use crate::application::tools::remember::RememberTool;
 use crate::application::tools::web_search::WebSearchTool;
 use crate::device_server::Device as DeviceType;
 use crate::ports::events::EventSink;
@@ -54,6 +56,17 @@ const MCP_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default path (relative to the working directory) for the multi-server
 /// MCP config, overridable with `NALA_MCP_CONFIG`.
 const DEFAULT_MCP_CONFIG_PATH: &str = "mcp.json";
+
+/// Default path (relative to the working directory) for the persistent
+/// memory file, overridable with `NALA_MEMORY_FILE` — same pattern as
+/// `NALA_METRICS_DIR` in `main.rs`.
+const DEFAULT_MEMORY_PATH: &str = "data/memory.json";
+
+fn memory_path() -> std::path::PathBuf {
+    std::env::var("NALA_MEMORY_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from(DEFAULT_MEMORY_PATH))
+}
 
 /// Used when `NALA_MODEL` isn't set. A real, commonly-pulled Ollama tag —
 /// callers on a different model should set the env var rather than rely on
@@ -97,6 +110,7 @@ pub fn build_assistant<E: EventSink>(
     registry.register(GetWeatherTool::<ReqwestFetcher>::definition());
     registry.register(WebSearchTool::<ReqwestFetcher>::definition());
     registry.register(FetchUrlTool::<ReqwestFetcher>::definition());
+    registry.register(RememberTool::definition());
 
     let mut dispatcher: DispatcherType = ToolDispatcher::new().with_device_registry(devices);
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(computer)));
@@ -113,6 +127,15 @@ pub fn build_assistant<E: EventSink>(
     ));
     dispatcher.register(Tools::WebSearch(WebSearchTool::new(ReqwestFetcher::new())));
     dispatcher.register(Tools::FetchUrl(FetchUrlTool::new(ReqwestFetcher::new())));
+    // The tool and the `Assistant` below each get their own `FileMemoryStore`
+    // handle over the same path rather than sharing one — the tool writes
+    // through it when `remember` is called, and `Assistant` rereads the
+    // file fresh at the start of every turn (see
+    // `agent_loop::build_prompt_messages`), so there's no need for shared,
+    // interior-mutable ownership between them.
+    dispatcher.register(Tools::Remember(RememberTool::new(Box::new(
+        FileMemoryStore::new(memory_path()),
+    ))));
 
     // MCP tools, spawned over stdio and exposed to the model. Servers come
     // from two places, both optional and additive:
@@ -158,6 +181,7 @@ pub fn build_assistant<E: EventSink>(
 
     Assistant::new(llm, dispatcher, registry, events)
         .with_planning_enabled(std::env::var("NALA_PLANNING").as_deref() == Ok("on"))
+        .with_memory(Box::new(FileMemoryStore::new(memory_path())))
 }
 
 /// One server entry parsed out of the MCP config JSON.

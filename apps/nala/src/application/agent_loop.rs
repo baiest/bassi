@@ -649,15 +649,17 @@ where
     }
 
     /// Context can change between turns, so it is fetched fresh each time
-    /// and never persisted in the transcript.
+    /// and never persisted in the transcript. Remembered facts (see
+    /// `memory` on `Assistant`) are re-read the same way, for the same
+    /// reason — a `remember` call from an earlier turn only lives on disk,
+    /// not in the transcript.
     ///
-    /// The context message is placed *before* the transcript rather than
-    /// appended after it. Its content is invariant within a run (it doesn't
-    /// depend on what's been said), so putting it first keeps it part of
-    /// the prompt's stable prefix — everything after it only grows by
-    /// appending as the turn proceeds. A backend that caches the prompt
-    /// prefix (e.g. Ollama/llama.cpp) can then reuse that cached prefix
-    /// across calls instead of reprocessing it every time.
+    /// Both go *before* the transcript rather than appended after it: their
+    /// content doesn't depend on what's been said, so putting them first
+    /// keeps them part of the prompt's stable prefix — everything after
+    /// only grows by appending as the turn proceeds. A backend that caches
+    /// the prompt prefix (e.g. Ollama/llama.cpp) can then reuse it across
+    /// calls instead of reprocessing it every time.
     pub(crate) fn build_prompt_messages(
         &mut self,
     ) -> Result<Vec<Message>, AssistantError<LlmError, D::Error>> {
@@ -669,6 +671,20 @@ where
         let mut messages = vec![system_message(format!(
             "Computer context:\n{context}\n\nUse this context when generating commands."
         ))];
+
+        // Omitted entirely when there's nothing remembered, rather than an
+        // empty "Remembered facts:" message — no point spending tokens (or
+        // varying the prompt) over nothing.
+        let facts = self.memory.facts();
+        if !facts.is_empty() {
+            let facts_text = facts
+                .into_iter()
+                .map(|(key, value)| format!("- {key}: {value}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            messages.push(system_message(format!("Remembered facts:\n{facts_text}")));
+        }
+
         messages.extend(self.transcript.snapshot());
 
         Ok(messages)
