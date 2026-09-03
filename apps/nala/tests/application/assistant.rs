@@ -30,9 +30,10 @@ use crate::{
         CallsScreenshotThenAnswersLlm, ChainsDistinctToolCallsThenAnswersLlm, EchoesLastMessageLlm,
         FailingLlm, FailsPlanningThenExecutesLlm, FailsTwiceThenSucceedsLlm,
         FailsWithInvalidResponseLlm, FakeLlm, HangsOnRealCallLlm, MutatesThenAnswersImmediatelyLlm,
-        MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RepeatsSameCallTwiceThenAnswersLlm,
-        RepeatsSameToolCallLlm, RepliesWithUsageLlm, RequestsTwoToolCallsAtOnceThenAnswersLlm,
-        ResolvesInOneToolCallLlm, RetriesSameToolWithDifferentArgsLlm,
+        MutatesThenChecksThenAnswersLlm, PlansThenExecutesLlm, RecordsMessagesLlm,
+        RepeatsSameCallTwiceThenAnswersLlm, RepeatsSameToolCallLlm, RepliesWithUsageLlm,
+        RequestsTwoToolCallsAtOnceThenAnswersLlm, ResolvesInOneToolCallLlm,
+        RetriesSameToolWithDifferentArgsLlm,
     },
     fake_mcp::FakeMcpClient,
 };
@@ -156,6 +157,38 @@ fn resolves_simple_request_in_a_single_tool_call() {
     let result = assistant.process("what time is it?");
 
     assert_eq!(result.unwrap(), "it's 10:00 AM");
+}
+
+#[test]
+fn puts_the_invariant_computer_context_before_the_transcript() {
+    // The computer context (username/dirs) never changes within a run, so
+    // it belongs at the front of the prompt: everything after it grows by
+    // appending, keeping the shared prefix stable across turns for a
+    // backend that caches it (Ollama/llama.cpp). Putting it last, after the
+    // transcript, would make that invariant content the part that keeps
+    // moving instead.
+    let llm = RecordsMessagesLlm::new();
+    let received = llm.received.clone();
+
+    let mut assistant = assistant_with(llm, FakeComputer::new());
+    assistant.process("what time is it?").unwrap();
+
+    let messages = received.lock().unwrap()[0].clone();
+    let context_index = messages
+        .iter()
+        .position(|message| {
+            message.role == "system" && message.content.contains("Computer context")
+        })
+        .expect("a system message with the computer context");
+    let user_index = messages
+        .iter()
+        .position(|message| message.role == "user")
+        .expect("the user's message");
+
+    assert!(
+        context_index < user_index,
+        "expected computer context before the transcript, got: {messages:#?}"
+    );
 }
 
 #[test]

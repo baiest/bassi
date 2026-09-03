@@ -642,6 +642,14 @@ where
 
     /// Context can change between turns, so it is fetched fresh each time
     /// and never persisted in the transcript.
+    ///
+    /// The context message is placed *before* the transcript rather than
+    /// appended after it. Its content is invariant within a run (it doesn't
+    /// depend on what's been said), so putting it first keeps it part of
+    /// the prompt's stable prefix — everything after it only grows by
+    /// appending as the turn proceeds. A backend that caches the prompt
+    /// prefix (e.g. Ollama/llama.cpp) can then reuse that cached prefix
+    /// across calls instead of reprocessing it every time.
     pub(crate) fn build_prompt_messages(
         &mut self,
     ) -> Result<Vec<Message>, AssistantError<LlmError, D::Error>> {
@@ -650,10 +658,10 @@ where
             .get_context()
             .map_err(AssistantError::Tool)?;
 
-        let mut messages = self.transcript.snapshot();
-        messages.push(system_message(format!(
+        let mut messages = vec![system_message(format!(
             "Computer context:\n{context}\n\nUse this context when generating commands."
-        )));
+        ))];
+        messages.extend(self.transcript.snapshot());
 
         Ok(messages)
     }

@@ -51,6 +51,33 @@ fn can_register_multiple_tools() {
 }
 
 #[test]
+fn definitions_are_returned_in_registration_order() {
+    // The tool list is serialized into the LLM prompt on every call, so its
+    // order must be stable across calls — a backend that caches the prompt
+    // prefix (e.g. Ollama/llama.cpp) only reuses it when the bytes match
+    // exactly. Registration order (not, say, alphabetical) is asserted
+    // because it's the order `bootstrap.rs` already registers tools in.
+    let mut registry = ToolRegistry::new();
+
+    let names = ["zebra", "alpha", "mango", "kappa"];
+    for name in names {
+        registry.register(ToolDefinition {
+            name: name.to_string(),
+            description: "d".to_string(),
+            parameters: serde_json::json!({}),
+        });
+    }
+
+    let observed: Vec<&str> = registry
+        .definitions()
+        .into_iter()
+        .map(|definition| definition.name.as_str())
+        .collect();
+
+    assert_eq!(observed, names);
+}
+
+#[test]
 fn can_register_a_tool_with_a_runtime_discovered_name() {
     let mut registry = ToolRegistry::new();
 
