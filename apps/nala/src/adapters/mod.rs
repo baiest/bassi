@@ -4,6 +4,7 @@ pub mod devices;
 pub mod events;
 pub mod http;
 pub mod llm;
+pub mod memory;
 pub mod metrics;
 pub mod token_counter;
 pub mod wall_clock;

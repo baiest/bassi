@@ -17,7 +17,7 @@ use crate::{
         tools::{
             Tool, current_time::CurrentTimeTool, device_toolset::DeviceToolset,
             fetch_url::FetchUrlTool, get_weather::GetWeatherTool, mcp_toolset::McpToolset,
-            ping::PingTool, web_search::WebSearchTool,
+            ping::PingTool, remember::RememberTool, web_search::WebSearchTool,
         },
     },
     ports::{
@@ -135,6 +135,7 @@ pub enum Tools<
     GetWeather(GetWeatherTool<H>),
     WebSearch(WebSearchTool<H>),
     FetchUrl(FetchUrlTool<H>),
+    Remember(RememberTool),
     // One `McpToolset` per connected server, so a tool-name collision
     // across servers is resolved by taking the first one that handles it —
     // see `dispatch` below.
@@ -404,6 +405,22 @@ impl<C: Computer, CL: WallClock, H: HttpFetcher, M: McpClient, R: RemoteDevice +
                         .execute(args)
                         .map(ToolOutcome::from)
                         .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)));
+                }
+                Tools::Remember(tool) if tool_call.name == RememberTool::NAME => {
+                    let args =
+                        RememberTool::parse_arguments(&tool_call.arguments).map_err(|error| {
+                            ToolDispatcherError::ToolErrorParsingArguments(Box::new(error))
+                        })?;
+
+                    let text = tool
+                        .execute(args)
+                        .map_err(|error| ToolDispatcherError::ToolExecuteError(Box::new(error)))?;
+
+                    return Ok(ToolOutcome {
+                        text,
+                        images: Vec::new(),
+                        mutated: RememberTool::MUTATING,
+                    });
                 }
                 Tools::Mcp(toolsets) => {
                     let Some(toolset) = toolsets

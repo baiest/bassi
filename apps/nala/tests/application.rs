@@ -52,8 +52,14 @@ mod dispatcher;
 #[path = "application/tools/mcp_toolset.rs"]
 mod mcp_toolset;
 
+#[path = "application/tools/remember.rs"]
+mod remember;
+
 #[path = "application/assistant.rs"]
 mod assistant;
+
+#[path = "application/memory.rs"]
+mod memory;
 
 #[path = "application/context_budget.rs"]
 mod context_budget;
