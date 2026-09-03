@@ -782,3 +782,34 @@ impl Llm for MutatesThenChecksThenAnswersLlm {
         }
     }
 }
+
+/// Records the `messages` slice it receives on every `generate` call (as
+/// owned `Message`s) into a shared `Vec`, then answers immediately with
+/// text. Used to assert on the exact prompt shape `Assistant` builds, e.g.
+/// message ordering.
+#[derive(Default)]
+pub struct RecordsMessagesLlm {
+    pub received: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+impl RecordsMessagesLlm {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Llm for RecordsMessagesLlm {
+    fn generate(
+        &mut self,
+        messages: &[Message],
+        tools: &[&ToolDefinition],
+    ) -> Result<LlmResponse, LlmError> {
+        if tools.is_empty() {
+            return Ok(LlmResponse::text("plan"));
+        }
+
+        self.received.lock().unwrap().push(messages.to_vec());
+
+        Ok(LlmResponse::text("done"))
+    }
+}
