@@ -2,18 +2,40 @@ use egui::Color32;
 
 use crate::status::Status;
 
-/// Maps a `Status` to the color the overlay's circle should be — pure and
+/// Maps a `Status` to the color the overlay's core should be — pure and
 /// separate from any drawing code, so it's testable without a window.
 /// Colors are chosen for a distinct, at-a-glance read even in peripheral
-/// vision: cool/neutral while idle, warm while acting, red for an error.
+/// vision: blue at rest (the overlay's base identity), warm while acting,
+/// red for an error.
 pub fn status_color(status: Status) -> Color32 {
     match status {
-        Status::Idle => Color32::from_rgb(90, 90, 110),
-        Status::Listening => Color32::from_rgb(64, 160, 255),
+        Status::Idle => Color32::from_rgb(40, 110, 210),
+        Status::Listening => Color32::from_rgb(90, 200, 255),
         Status::Sending => Color32::from_rgb(180, 120, 255),
         Status::Speaking => Color32::from_rgb(60, 220, 130),
         Status::Error => Color32::from_rgb(230, 60, 60),
     }
+}
+
+/// The lighter color painted on the point cloud and orbital rings around
+/// the core — same hue family as [`status_color`], but brighter so the
+/// points read as highlights rather than competing with the core.
+pub fn accent_color(status: Status) -> Color32 {
+    match status {
+        Status::Idle => Color32::from_rgb(120, 190, 255),
+        Status::Listening => Color32::from_rgb(180, 230, 255),
+        Status::Sending => Color32::from_rgb(215, 180, 255),
+        Status::Speaking => Color32::from_rgb(160, 240, 190),
+        Status::Error => Color32::from_rgb(255, 150, 150),
+    }
+}
+
+/// The soft, low-alpha halo painted behind the core. Alpha is fixed low
+/// here rather than left to the caller, since a halo that isn't faint just
+/// reads as a second, badly-drawn circle.
+pub fn glow_color(status: Status) -> Color32 {
+    let base = status_color(status);
+    Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 70)
 }
 
 #[cfg(test)]
@@ -54,5 +76,32 @@ mod tests {
             status_color(Status::Speaking),
             status_color(Status::Speaking)
         );
+    }
+
+    #[test]
+    fn idle_is_a_shade_of_blue() {
+        let color = status_color(Status::Idle);
+
+        assert!(color.b() > color.r() && color.b() > color.g());
+    }
+
+    #[test]
+    fn every_status_maps_to_a_distinct_accent_color() {
+        let colors: Vec<Color32> = ALL.iter().copied().map(accent_color).collect();
+
+        for (i, a) in colors.iter().enumerate() {
+            for (j, b) in colors.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "accents at {i} and {j} share a color");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glow_color_is_faint() {
+        for status in ALL {
+            assert!(glow_color(status).a() < 128);
+        }
     }
 }

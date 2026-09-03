@@ -8,6 +8,9 @@
 pub mod amplitude;
 pub mod clip;
 pub mod color;
+pub mod config;
+pub mod motion;
+pub mod scene;
 pub mod status;
 
 #[cfg(windows)]
