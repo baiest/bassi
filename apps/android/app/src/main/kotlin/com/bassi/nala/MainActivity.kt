@@ -11,8 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.widget.Button
-import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,15 +20,17 @@ import androidx.core.content.ContextCompat
 import com.bassi.nala.audio.Recorder
 import com.bassi.nala.audio.WavWriter
 import com.bassi.nala.settings.Prefs
-import com.bassi.nala.ui.MicButton
+import com.bassi.nala.ui.NalaCoreView
+import com.bassi.nala.ui.SettingsDialog
+import com.bassi.nala.ui.core.CoreStatus
 
 /**
- * The only screen: connection status, a host:port field, and one circular
- * mic button that toggles recording. The connection itself and clip
- * playback live in [NalaService] — a foreground service this activity
- * binds to but doesn't own — so a reply that arrives, or is still playing,
- * survives this activity closing. Recording (the microphone) still only
- * happens while this activity is open.
+ * The only screen: connection status, the 3D core (tap to talk), and a
+ * settings icon that opens host:port + auto-reconnect. The connection
+ * itself and clip playback live in [NalaService] — a foreground service
+ * this activity binds to but doesn't own — so a reply that arrives, or is
+ * still playing, survives this activity closing. Recording (the
+ * microphone) still only happens while this activity is open.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -38,12 +39,12 @@ class MainActivity : AppCompatActivity() {
 
     private var recorder: Recorder? = null
     private var recording = false
+    private var awaitingReply = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private lateinit var textStatus: TextView
     private lateinit var textTurnStatus: TextView
-    private lateinit var editHostPort: EditText
-    private lateinit var micButton: MicButton
+    private lateinit var coreView: NalaCoreView
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -51,7 +52,13 @@ class MainActivity : AppCompatActivity() {
             nalaService = service
             bound = true
             service.onStatusChanged = { status -> runOnUi { updateStatusUi(status) } }
-            service.onClipReceived = { runOnUi { setTurnStatus(getString(R.string.playing_reply)) } }
+            service.onClipReceived = {
+                runOnUi {
+                    awaitingReply = false
+                    coreView.status = CoreStatus.SPEAKING
+                    setTurnStatus(getString(R.string.playing_reply))
+                }
+            }
             updateStatusUi(service.status)
         }
 
@@ -82,13 +89,10 @@ class MainActivity : AppCompatActivity() {
 
         textStatus = findViewById(R.id.textStatus)
         textTurnStatus = findViewById(R.id.textTurnStatus)
-        editHostPort = findViewById(R.id.editHostPort)
-        micButton = findViewById(R.id.micButton)
+        coreView = findViewById(R.id.coreView)
 
-        editHostPort.setText("${Prefs.host(this)}:${Prefs.port(this)}")
-
-        findViewById<Button>(R.id.btnConnect).setOnClickListener { saveAndReconnect() }
-        micButton.setOnClickListener { onRecordClicked() }
+        findViewById<ImageButton>(R.id.btnSettings).setOnClickListener { openSettings() }
+        coreView.setOnClickListener { onRecordClicked() }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -102,21 +106,11 @@ class MainActivity : AppCompatActivity() {
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    private fun parseHostPort(): Pair<String, Int>? {
-        val raw = editHostPort.text.toString().trim()
-        val separatorIndex = raw.lastIndexOf(':')
-        val port = raw.substring(separatorIndex + 1).toIntOrNull()
-        if (separatorIndex <= 0 || port == null) return null
-        return raw.substring(0, separatorIndex) to port
-    }
-
-    private fun saveAndReconnect() {
-        val (host, port) = parseHostPort() ?: run {
-            Toast.makeText(this, R.string.invalid_host_port, Toast.LENGTH_SHORT).show()
-            return
+    private fun openSettings() {
+        SettingsDialog.show(this) { host, port ->
+            Prefs.save(this, host, port)
+            nalaService?.connect()
         }
-        Prefs.save(this, host, port)
-        nalaService?.connect()
     }
 
     private fun onRecordClicked() {
@@ -136,34 +130,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         recording = true
-        micButton.recording = true
-        micButton.amplitude = 0f
+        coreView.status = CoreStatus.LISTENING
+        coreView.amplitude = 0f
         setTurnStatus(getString(R.string.recording))
 
-        val newRecorder = Recorder(onAmplitude = { amplitude -> runOnUi { micButton.amplitude = amplitude } })
+        val newRecorder = Recorder(onAmplitude = { amplitude -> runOnUi { coreView.amplitude = amplitude } })
         recorder = newRecorder
         newRecorder.start()
     }
 
     private fun stopRecordingAndSend() {
         recording = false
-        micButton.recording = false
-        micButton.amplitude = 0f
+        coreView.amplitude = 0f
 
         val pcm = recorder?.stop() ?: ShortArray(0)
         recorder = null
 
         if (pcm.isEmpty()) {
+            coreView.status = CoreStatus.IDLE
             setTurnStatus(getString(R.string.nothing_recorded))
             return
         }
 
+        coreView.status = CoreStatus.SENDING
         setTurnStatus(getString(R.string.sending))
         val wav = WavWriter.wrap(pcm, Recorder.SAMPLE_RATE, channels = 1)
         val sent = nalaService?.socket?.sendUtterance(wav) ?: false
         if (!sent) {
+            coreView.status = CoreStatus.ERROR
             setTurnStatus(getString(R.string.not_connected))
+            return
         }
+        awaitingReply = true
     }
 
     private fun updateStatusUi(status: NalaService.Status) {
@@ -172,7 +170,20 @@ class MainActivity : AppCompatActivity() {
         textStatus.text = when (status) {
             NalaService.Status.CONNECTING -> getString(R.string.connecting)
             NalaService.Status.CONNECTED -> getString(R.string.connected, host, port)
-            NalaService.Status.DISCONNECTED -> getString(R.string.disconnected)
+            NalaService.Status.DISCONNECTED ->
+                if (Prefs.autoReconnect(this)) getString(R.string.disconnected)
+                else getString(R.string.disconnected_manual)
+        }
+
+        // The core itself only reflects DISCONNECTED as an error while the
+        // user isn't mid-turn — recording/sending/speaking already have
+        // their own status, and a reply already in flight shouldn't flash
+        // red just because the socket briefly reports disconnected between
+        // sending and the clip arriving.
+        if (status == NalaService.Status.DISCONNECTED && !recording && !awaitingReply) {
+            coreView.status = CoreStatus.ERROR
+        } else if (status == NalaService.Status.CONNECTED && !recording && !awaitingReply) {
+            coreView.status = CoreStatus.IDLE
         }
     }
 

@@ -4,13 +4,16 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.bassi.nala.net.NalaSocket
 import com.bassi.nala.playback.ClipPlayer
@@ -43,6 +46,14 @@ class NalaService : Service() {
     private var reconnectDelayMs = RECONNECT_INITIAL_DELAY_MS
     private val reconnectRunnable = Runnable { connect(resetBackoff = false) }
 
+    // With the screen off, WiFi power-save and CPU doze are what actually
+    // kill the socket (the 20s OkHttp ping starts failing) — these two
+    // locks are what keeps the connection (and the ability to receive a
+    // reply) alive in the background. Held for the service's whole life,
+    // not just while CONNECTED, so a drop can still be detected and retried.
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
     var onStatusChanged: ((Status) -> Unit)? = null
     var onClipReceived: (() -> Unit)? = null
 
@@ -61,9 +72,37 @@ class NalaService : Service() {
         super.onCreate()
         socket = NalaSocket()
         clipPlayer = ClipPlayer(applicationContext)
+        acquireLocks()
         createNotificationChannel()
         startForegroundWithNotification()
         connect()
+    }
+
+    private fun acquireLocks() {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val wifiLockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = wifiManager.createWifiLock(wifiLockMode, "nala:wifi").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+
+        val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nala:socket").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseLocks() {
+        wifiLock?.takeIf { it.isHeld }?.release()
+        wifiLock = null
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -109,12 +148,17 @@ class NalaService : Service() {
     }
 
     /**
-     * Retries with exponential backoff (1s, 2s, 4s, … capped at 30s),
-     * indefinitely, as long as the service is alive — the only way out is
-     * a successful connection (which resets the delay) or [onDestroy].
+     * Retries with exponential backoff (1s, 2s, 4s, … capped at 30s), as
+     * long as the service is alive *and* [Prefs.autoReconnect] is on — the
+     * only ways out are a successful connection (which resets the delay),
+     * the user flipping the switch off, or [onDestroy]. With the switch
+     * off this simply does nothing: the service stays DISCONNECTED until
+     * [connect] is called again (the user reopening settings and saving,
+     * or tapping the core).
      */
     private fun scheduleReconnect() {
         reconnectHandler.removeCallbacks(reconnectRunnable)
+        if (!Prefs.autoReconnect(this)) return
         reconnectHandler.postDelayed(reconnectRunnable, reconnectDelayMs)
         reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
     }
@@ -137,7 +181,9 @@ class NalaService : Service() {
         val text = when (status) {
             Status.CONNECTING -> getString(R.string.connecting)
             Status.CONNECTED -> getString(R.string.connected, host, port)
-            Status.DISCONNECTED -> getString(R.string.disconnected)
+            Status.DISCONNECTED ->
+                if (Prefs.autoReconnect(this)) getString(R.string.disconnected)
+                else getString(R.string.disconnected_manual)
         }
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
@@ -167,6 +213,7 @@ class NalaService : Service() {
         reconnectHandler.removeCallbacks(reconnectRunnable)
         socket.close()
         clipPlayer.release()
+        releaseLocks()
         super.onDestroy()
     }
 }
