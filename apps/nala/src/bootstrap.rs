@@ -4,6 +4,7 @@
 //! that needs more than that.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use device_capabilities::Capability;
@@ -27,7 +28,6 @@ use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
 use crate::application::tools::Tool;
 use crate::application::tools::current_time::CurrentTimeTool;
-use crate::application::tools::device_toolset::DeviceToolset;
 use crate::application::tools::dispatcher::{ToolDispatcher, Tools};
 use crate::application::tools::fetch_url::FetchUrlTool;
 use crate::application::tools::get_weather::GetWeatherTool;
@@ -66,14 +66,13 @@ pub const DEFAULT_MODEL: &str = "llama3.2";
 /// rather than built here, since it differs between a headless run and a
 /// voice front end that narrates through it.
 ///
-/// `devices` is snapshotted once, at this call — a device connecting or
-/// disconnecting afterwards isn't picked up until the next
-/// `build_assistant` call (the next turn-client connection, in
-/// `nala --serve`). Pass an empty `DeviceRegistry::new()` for a caller
-/// with no device server running (the local REPL).
+/// `devices` is wired into the dispatcher live — a device connecting or
+/// disconnecting is picked up on the very next turn, not just the next
+/// `build_assistant` call. Pass an empty `Arc::new(DeviceRegistry::new())`
+/// for a caller with no device server running (the local REPL).
 pub fn build_assistant<E: EventSink>(
     events: E,
-    devices: &DeviceRegistry<DeviceType>,
+    devices: Arc<DeviceRegistry<DeviceType>>,
 ) -> Assistant<OllamaLlm, DispatcherType, E> {
     let process = WindowsProcess::new();
     let environment = SystemEnvironment::new();
@@ -99,7 +98,7 @@ pub fn build_assistant<E: EventSink>(
     registry.register(WebSearchTool::<ReqwestFetcher>::definition());
     registry.register(FetchUrlTool::<ReqwestFetcher>::definition());
 
-    let mut dispatcher: DispatcherType = ToolDispatcher::new();
+    let mut dispatcher: DispatcherType = ToolDispatcher::new().with_device_registry(devices);
     dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(computer)));
     dispatcher.register(Tools::OpenUrl(OpenUrlTool::new(open_url_computer)));
     dispatcher.register(Tools::OpenApp(OpenAppTool::new(open_app_computer)));
@@ -144,21 +143,14 @@ pub fn build_assistant<E: EventSink>(
         dispatcher.register(Tools::Mcp(toolsets));
     }
 
-    // Every currently-connected device, published as `<device>_<capability>`
-    // tools — see `build_assistant`'s doc comment for why this is a
-    // snapshot rather than something that updates live.
-    let connected_devices = devices.snapshot();
-    if !connected_devices.is_empty() {
-        let mut toolsets = Vec::with_capacity(connected_devices.len());
-        for device in connected_devices {
-            let toolset = DeviceToolset::new(device);
-            for definition in toolset.definitions() {
-                registry.register(definition);
-            }
-            toolsets.push(toolset);
-        }
-        dispatcher.register(Tools::Devices(toolsets));
-    }
+    // Connected devices are published as `<device>_<capability>` tools
+    // (`pc_open_url`, ...) and, per `ToolRegistry::set_device_tools`,
+    // shadow any native tool of the same bare name — see
+    // `application::tools::device_toolset` and `application::tools::dispatcher`.
+    // They aren't registered here: `dispatcher.with_device_registry` above
+    // re-derives them live from `devices` every turn (`Assistant::process`
+    // calls `registry.set_device_tools(dispatcher.device_tools())`), so a
+    // device connecting or disconnecting mid-session needs no reconnect.
 
     let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let llm =

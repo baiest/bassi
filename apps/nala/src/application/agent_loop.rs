@@ -97,6 +97,14 @@ where
         );
 
         let mut messages = self.build_prompt_messages()?;
+
+        // Re-derived every turn (not just once at connection time) so a
+        // device connecting or disconnecting mid-session is reflected
+        // without the turn-client having to reconnect — see
+        // `ToolDispatcher::device_tools`.
+        let device_tools = self.dispatcher.device_tools();
+        self.registry.set_device_tools(device_tools);
+
         // Cloned rather than borrowed from `self.registry`, so `tools` doesn't
         // keep an immutable borrow of `self` alive across the `&mut self`
         // calls below (`build_plan`, `self.generate`, ...).

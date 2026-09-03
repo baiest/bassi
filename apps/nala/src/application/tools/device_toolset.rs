@@ -42,6 +42,15 @@ impl<D: RemoteDevice> DeviceToolset<D> {
             .any(|definition| definition.name == name)
     }
 
+    /// Whether this device publishes `name` as a capability, ignoring the
+    /// device-name prefix — e.g. a `pc` device with `handles("pc_open_url")`
+    /// also `handles_bare("open_url")`. Used to route a bare tool-call name
+    /// (the same name a native tool would use) to a connected device when
+    /// only one device publishes it — see `ToolDispatcher::dispatch`.
+    pub fn handles_bare(&self, name: &str) -> bool {
+        self.device.capabilities().iter().any(|c| c.name == name)
+    }
+
     /// Exposed for tests, to inspect what was sent to the device.
     pub fn device(&self) -> &D {
         &self.device
