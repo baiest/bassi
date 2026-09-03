@@ -63,10 +63,12 @@ class MainActivity : AppCompatActivity() {
                 runOnUi {
                     if (!recording) {
                         coreView.status = CoreStatus.IDLE
+                        coreView.amplitude = 0f
                         setTurnStatus("")
                     }
                 }
             }
+            service.onPlaybackAmplitude = { level -> runOnUi { coreView.amplitude = level } }
             updateStatusUi(service.status)
         }
 
@@ -209,6 +211,7 @@ class MainActivity : AppCompatActivity() {
             nalaService?.onStatusChanged = null
             nalaService?.onClipReceived = null
             nalaService?.onPlaybackFinished = null
+            nalaService?.onPlaybackAmplitude = null
             unbindService(serviceConnection)
             bound = false
         }
