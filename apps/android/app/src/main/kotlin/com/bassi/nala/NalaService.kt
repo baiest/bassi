@@ -56,6 +56,7 @@ class NalaService : Service() {
 
     var onStatusChanged: ((Status) -> Unit)? = null
     var onClipReceived: (() -> Unit)? = null
+    var onPlaybackFinished: (() -> Unit)? = null
 
     var status: Status = Status.DISCONNECTED
         private set(value) {
@@ -71,7 +72,9 @@ class NalaService : Service() {
     override fun onCreate() {
         super.onCreate()
         socket = NalaSocket()
-        clipPlayer = ClipPlayer(applicationContext)
+        clipPlayer = ClipPlayer(applicationContext).apply {
+            onQueueDrained = { onPlaybackFinished?.invoke() }
+        }
         acquireLocks()
         createNotificationChannel()
         startForegroundWithNotification()
