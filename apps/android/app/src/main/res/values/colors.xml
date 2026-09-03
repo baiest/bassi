@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fixed dark background so the core's blue palette reads the way it
+         does in nala-overlay, regardless of system light/dark mode. -->
+    <color name="nala_background">#0D1117</color>
+    <color name="nala_text">#E6EDF3</color>
+</resources>

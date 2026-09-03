@@ -13,4 +13,9 @@
     <string name="not_connected">No conectado a Nala</string>
     <string name="playing_reply">Reproduciendo respuesta…</string>
     <string name="mic_permission_required">Se necesita permiso de micrófono</string>
+    <string name="settings">Ajustes</string>
+    <string name="auto_reconnect">Reconexión automática</string>
+    <string name="save">Guardar</string>
+    <string name="cancel">Cancelar</string>
+    <string name="disconnected_manual">Desconectado</string>
 </resources>
