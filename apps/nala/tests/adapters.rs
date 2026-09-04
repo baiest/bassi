@@ -18,3 +18,6 @@ mod jsonl_metrics_sink;
 
 #[path = "adapters/memory/file.rs"]
 mod memory_file;
+
+#[path = "adapters/autonomous/in_memory_queue.rs"]
+mod in_memory_event_queue;
