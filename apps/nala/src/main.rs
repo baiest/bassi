@@ -29,6 +29,15 @@ fn main() {
         // silently accepting devices with no authentication at all.
         let device_token = std::env::var("NALA_DEVICE_TOKEN").ok();
 
+        // Same default as the local REPL below, so every served turn also
+        // gets token/duration accounting instead of only CLI sessions.
+        let metrics_dir = Some(
+            std::env::var("NALA_METRICS_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("data/metrics")),
+        );
+        let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+
         let devices = Arc::new(DeviceRegistry::new());
 
         let device_server_devices = Arc::clone(&devices);
@@ -40,7 +49,7 @@ fn main() {
             }
         });
 
-        if let Err(error) = nala::server::serve(&addr, devices) {
+        if let Err(error) = nala::server::serve(&addr, devices, metrics_dir, &model) {
             eprintln!("Error: could not start the server on {addr}: {error}");
             std::process::exit(1);
         }
