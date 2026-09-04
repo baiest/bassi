@@ -4,5 +4,6 @@ pub mod context_budget;
 pub mod devices;
 pub mod loop_limits;
 pub mod memory;
+pub mod metrics_report;
 pub mod tools;
 pub mod transcript;
