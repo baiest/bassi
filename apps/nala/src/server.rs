@@ -15,6 +15,7 @@ use tungstenite::{Message, WebSocket};
 
 use crate::adapters::events::console::ConsoleEventSink;
 use crate::adapters::metrics::csv_sink::CsvMetricsSink;
+use crate::adapters::metrics::jsonl_sink::JsonlMetricsSink;
 use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
 use crate::bootstrap;
@@ -153,15 +154,16 @@ pub fn run_session<L, D, E, W>(
 }
 
 /// Builds one connection's event sink: same wrap-and-forward chain as the
-/// local REPL (`main.rs`) — `CsvMetricsSink` for token/duration accounting,
-/// wrapped in `WsEventSink` to also stream progress to the client. Used by
-/// `handle_connection`, and exposed for tests since `handle_connection`
-/// itself needs a real `TcpStream`.
+/// local REPL (`main.rs`) — `JsonlMetricsSink` and `CsvMetricsSink` for
+/// token/duration accounting, wrapped in `WsEventSink` to also stream
+/// progress to the client. Used by `handle_connection`, and exposed for
+/// tests since `handle_connection` itself needs a real `TcpStream`.
 pub fn build_events<W: Wire>(
     wire: Arc<Mutex<W>>,
     metrics_dir: Option<PathBuf>,
-) -> WsEventSink<CsvMetricsSink<ConsoleEventSink>, W> {
-    let inner = CsvMetricsSink::new(ConsoleEventSink, metrics_dir);
+) -> WsEventSink<CsvMetricsSink<JsonlMetricsSink<ConsoleEventSink>>, W> {
+    let inner = JsonlMetricsSink::new(ConsoleEventSink, metrics_dir.clone());
+    let inner = CsvMetricsSink::new(inner, metrics_dir);
     WsEventSink::new(inner, wire)
 }
 
