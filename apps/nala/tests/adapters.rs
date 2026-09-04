@@ -13,5 +13,8 @@ mod console;
 #[path = "adapters/metrics/csv_sink.rs"]
 mod csv_metrics_sink;
 
+#[path = "adapters/metrics/jsonl_sink.rs"]
+mod jsonl_metrics_sink;
+
 #[path = "adapters/memory/file.rs"]
 mod memory_file;

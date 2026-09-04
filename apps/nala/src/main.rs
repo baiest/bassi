@@ -4,6 +4,7 @@ use std::thread;
 
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
+use nala::adapters::metrics::jsonl_sink::JsonlMetricsSink;
 use nala::application::devices::registry::DeviceRegistry;
 use nala::bootstrap;
 use nala::cli::prompt::MultilineReader;
@@ -63,6 +64,7 @@ fn main() {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data/metrics")),
     );
+    let events = JsonlMetricsSink::new(events, metrics_dir.clone());
     let events = CsvMetricsSink::new(events, metrics_dir);
 
     // The local REPL has no device server running, so no device is ever
