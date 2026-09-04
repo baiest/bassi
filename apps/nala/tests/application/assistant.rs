@@ -124,6 +124,35 @@ fn process_from_carries_the_prompt_and_the_given_source() {
 }
 
 #[test]
+fn respond_to_runs_a_turn_tagged_as_the_autonomous_source() {
+    use nala::ports::autonomous::AutonomousAgent;
+
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    let reply = AutonomousAgent::respond_to(&mut assistant, "battery at 9%, act on it").unwrap();
+
+    assert!(!reply.is_empty());
+    match &assistant.events().events[0] {
+        Event::RequestStarted { source, prompt, .. } => {
+            assert_eq!(*source, RequestSource::Autonomous);
+            assert_eq!(prompt, "battery at 9%, act on it");
+        }
+        other => panic!("expected RequestStarted, got {other:?}"),
+    }
+}
+
+#[test]
 fn stops_after_reaching_max_tool_calls() {
     // AlwaysCallsToolLlm targets an unregistered tool, so every call also
     // fails; disable the consecutive-failure limit so this test isolates
