@@ -1,3 +1,4 @@
+pub mod autonomous;
 pub mod cancellation;
 pub mod clock;
 pub mod devices;
