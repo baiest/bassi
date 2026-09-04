@@ -66,3 +66,9 @@ mod context_budget;
 
 #[path = "application/metrics_report.rs"]
 mod metrics_report;
+
+#[path = "application/autonomous/policy.rs"]
+mod autonomous_policy;
+
+#[path = "application/autonomous/event_loop.rs"]
+mod autonomous_event_loop;
