@@ -129,6 +129,39 @@ impl EventSink for ConsoleEventSink {
             Event::Greeting { text } => {
                 println!("[GREETING] {text}");
             }
+            Event::AutonomousEventReceived {
+                event_id,
+                source,
+                kind,
+            } => {
+                println!("[AUTONOMOUS] received {event_id} from {source} ({kind})");
+            }
+            Event::AutonomousEventIgnored { event_id, reason } => {
+                println!("[AUTONOMOUS] {event_id} ignored: {reason}");
+            }
+            Event::AutonomousEventDelegated { event_id } => {
+                println!("[AUTONOMOUS] {event_id} delegated to the agent loop");
+            }
+            Event::AutonomousEventCompleted {
+                event_id,
+                duration,
+                reply,
+            } => {
+                println!(
+                    "[AUTONOMOUS] {event_id} completed in {:?}: {reply}\n",
+                    duration
+                );
+            }
+            Event::AutonomousEventFailed {
+                event_id,
+                duration,
+                error,
+            } => {
+                println!(
+                    "[AUTONOMOUS] {event_id} failed in {:?}: {error}\n",
+                    duration
+                );
+            }
         }
     }
 }
