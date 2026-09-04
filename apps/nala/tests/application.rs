@@ -63,3 +63,6 @@ mod memory;
 
 #[path = "application/context_budget.rs"]
 mod context_budget;
+
+#[path = "application/metrics_report.rs"]
+mod metrics_report;

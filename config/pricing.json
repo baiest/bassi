@@ -1,0 +1,7 @@
+{
+  "ollama/*": { "input_per_mtok": 0.0, "output_per_mtok": 0.0 },
+  "bedrock/anthropic.claude-sonnet-4": { "input_per_mtok": 3.0, "output_per_mtok": 15.0 },
+  "bedrock/anthropic.claude-haiku-4.5": { "input_per_mtok": 1.0, "output_per_mtok": 5.0 },
+  "bedrock/amazon.nova-pro": { "input_per_mtok": 0.8, "output_per_mtok": 3.2 },
+  "bedrock/amazon.nova-lite": { "input_per_mtok": 0.06, "output_per_mtok": 0.24 }
+}
