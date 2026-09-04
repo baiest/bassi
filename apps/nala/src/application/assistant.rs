@@ -14,6 +14,7 @@ use crate::application::context_budget::ContextBudget;
 use crate::application::loop_limits::LoopLimits;
 use crate::application::tools::registry::ToolRegistry;
 use crate::application::transcript::Transcript;
+use crate::ports::autonomous::AutonomousAgent;
 use crate::ports::cancellation::{CancelSignal, NeverCancelled};
 use crate::ports::clock::Clock;
 use crate::ports::events::EventSink;
@@ -188,6 +189,24 @@ where
     /// The event sink, for inspecting what was emitted (tests only).
     pub fn events(&self) -> &E {
         &self.events
+    }
+}
+
+/// The bridge the autonomous event loop uses to reuse this same agent loop
+/// -- see `ports::autonomous::AutonomousAgent`. Every autonomous turn is
+/// tagged `RequestSource::Autonomous`, so it's distinguishable from user
+/// turns in metrics, and runs through the exact same `process_from` as
+/// everything else: no reasoning logic is duplicated for it.
+impl<L, D, E> AutonomousAgent for Assistant<L, D, E>
+where
+    L: Llm + Send + 'static,
+    D: ToolDispatcher<Output = ToolOutcome>,
+    D::Error: std::error::Error + 'static,
+    E: EventSink,
+{
+    fn respond_to(&mut self, prompt: &str) -> Result<String, String> {
+        self.process_from(prompt, crate::ports::events::RequestSource::Autonomous)
+            .map_err(|error| error.to_string())
     }
 }
 
