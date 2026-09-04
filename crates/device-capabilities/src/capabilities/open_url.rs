@@ -76,16 +76,25 @@ impl<C: Computer> Capability for OpenUrlTool<C> {
     fn execute(&mut self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         validate_url(&args.url)?;
 
-        // `rundll32 url.dll,FileProtocolHandler <url>` — the standard
-        // scripted way to invoke Windows's URL protocol handler directly.
-        // Both `cmd /C start "" <url>` and `explorer <url>` were observed
-        // failing on a real machine (the former denied outright, the
-        // latter opening File Explorer instead of the browser); this is
-        // the one that reliably opened the default browser there.
-        self.computer.execute_command(
-            &format!("rundll32 url.dll,FileProtocolHandler \"{}\"", args.url),
-            self.timeout,
-        )?;
+        // Two different launch methods have each been observed working on
+        // one real machine and failing on another, so neither is tried
+        // alone. `start "" <url>` goes first (verified working where
+        // `rundll32 url.dll,FileProtocolHandler` silently did nothing --
+        // exited 0 without ever opening a browser, see BAS-59); if `start`
+        // itself is denied outright (observed on a different machine, see
+        // BAS-52), `rundll32` is tried as the fallback. `explorer <url>`
+        // was also tried historically and opened File Explorer instead of
+        // a browser, so it isn't in this chain at all.
+        if self
+            .computer
+            .execute_command(&format!("start \"\" \"{}\"", args.url), self.timeout)
+            .is_err()
+        {
+            self.computer.execute_command(
+                &format!("rundll32 url.dll,FileProtocolHandler \"{}\"", args.url),
+                self.timeout,
+            )?;
+        }
 
         // `rundll32` is fire-and-forget: it hands the URL to the shell and
         // returns success almost instantly whether or not a browser window

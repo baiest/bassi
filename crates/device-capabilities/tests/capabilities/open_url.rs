@@ -15,15 +15,34 @@ fn opens_a_valid_http_url() {
     let result = tool.execute(args);
 
     assert!(result.is_ok());
-    // `rundll32 url.dll,FileProtocolHandler`, not `cmd /C start` or
-    // `explorer` — both of those were observed failing (denied, or opening
-    // File Explorer instead of the browser) on a machine where this
-    // rundll32 invocation, the standard scripted way to open a URL through
-    // Windows's own URL protocol handler, opened the default browser
-    // correctly. See BAS-52.
+    // `cmd /C start "" <url>` is tried first: `rundll32
+    // url.dll,FileProtocolHandler` was the original choice (see BAS-52),
+    // but was later found to silently do nothing on some machines --
+    // exiting 0 without actually opening a browser -- while `start`
+    // reliably worked there. It stays as the fallback below for the
+    // machine where `start` was itself denied outright. See BAS-59.
     assert_eq!(
         tool.computer.executed_command,
-        Some("rundll32 url.dll,FileProtocolHandler \"https://example.com\"".to_string())
+        Some("start \"\" \"https://example.com\"".to_string())
+    );
+}
+
+#[test]
+fn falls_back_to_rundll32_when_start_fails() {
+    let mut computer = FakeComputer::new();
+    computer.fail_when_command_contains = Some("start".to_string());
+    let mut tool: OpenUrlTool<FakeComputer> = OpenUrlTool::new(computer);
+
+    let args = OpenUrlArgs {
+        url: "https://example.com".to_string(),
+    };
+
+    let result = tool.execute(args);
+
+    assert!(result.is_ok());
+    assert_eq!(
+        tool.computer.commands_run,
+        vec!["rundll32 url.dll,FileProtocolHandler \"https://example.com\"".to_string()]
     );
 }
 
