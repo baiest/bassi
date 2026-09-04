@@ -120,8 +120,8 @@ pub fn run_session<L, D, E, W>(
     loop {
         let message = wire.lock().unwrap().recv();
         match message {
-            Ok(Some(ClientMessage::Input { text })) => {
-                let outcome = match assistant.process(&text) {
+            Ok(Some(ClientMessage::Input { text, source })) => {
+                let outcome = match assistant.process_from(&text, source) {
                     Ok(text) => ServerMessage::Reply { text },
                     Err(error) => {
                         // Printed here (not just sent to the client) so a

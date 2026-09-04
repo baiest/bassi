@@ -83,17 +83,26 @@ where
     D::Error: std::error::Error + 'static,
     E: EventSink,
 {
+    /// Runs one turn, tagging its `RequestStarted` with `RequestSource::Cli`
+    /// — the right default for every direct caller (the local REPL, and the
+    /// bulk of this crate's tests). `process_from` is the one to use for a
+    /// turn that arrived over the wire, where the real source is known.
     pub fn process(&mut self, input: &str) -> Result<String, AssistantError<LlmError, D::Error>> {
+        self.process_from(input, RequestSource::Cli)
+    }
+
+    pub fn process_from(
+        &mut self,
+        input: &str,
+        source: RequestSource,
+    ) -> Result<String, AssistantError<LlmError, D::Error>> {
         let request_start = Instant::now();
         self.current_task = TaskState::new();
 
         self.events.emit(Event::RequestStarted {
             task_id: self.task_id(),
             prompt: input.to_string(),
-            // The transport-level source (CLI/overlay/android/voice) isn't
-            // threaded through `process()` yet — a later change carries it
-            // from `ClientMessage::Input` down to here.
-            source: RequestSource::Unknown,
+            source,
         });
         self.set_state(TurnState::Receiving);
 

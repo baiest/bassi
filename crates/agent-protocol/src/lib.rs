@@ -262,8 +262,13 @@ pub trait EventSink {
 #[serde(tag = "type")]
 pub enum ClientMessage {
     /// One turn's worth of user input, already converted to text — the
-    /// agent never receives raw audio.
-    Input { text: String },
+    /// agent never receives raw audio. `#[serde(default)]` on `source` so a
+    /// client that predates it still decodes, as `RequestSource::Unknown`.
+    Input {
+        text: String,
+        #[serde(default)]
+        source: RequestSource,
+    },
     /// Ask the current turn to stop early, mirroring the local Ctrl+C
     /// behavior.
     Cancel,
@@ -290,13 +295,30 @@ mod tests {
     fn client_message_input_round_trips_through_json() {
         let message = ClientMessage::Input {
             text: "hola nala".to_string(),
+            source: RequestSource::Overlay,
         };
 
         let json = serde_json::to_string(&message).unwrap();
         let decoded: ClientMessage = serde_json::from_str(&json).unwrap();
 
         match decoded {
-            ClientMessage::Input { text } => assert_eq!(text, "hola nala"),
+            ClientMessage::Input { text, source } => {
+                assert_eq!(text, "hola nala");
+                assert_eq!(source, RequestSource::Overlay);
+            }
+            ClientMessage::Cancel => panic!("expected Input"),
+        }
+    }
+
+    #[test]
+    fn client_message_input_without_a_source_field_defaults_to_unknown() {
+        // An older client that predates `source` still has to decode —
+        // this is what `#[serde(default)]` on the field buys.
+        let decoded: ClientMessage =
+            serde_json::from_str(r#"{"type":"Input","text":"hola"}"#).unwrap();
+
+        match decoded {
+            ClientMessage::Input { source, .. } => assert_eq!(source, RequestSource::Unknown),
             ClientMessage::Cancel => panic!("expected Input"),
         }
     }

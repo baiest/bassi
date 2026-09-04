@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agent_protocol::Event;
+use agent_protocol::{Event, RequestSource};
 use tts::StreamSynthesizeSpeech;
 
 use crate::audio_server::synthesize_to_wav;
@@ -198,9 +198,9 @@ impl VoiceSession {
     /// Runs `text` as one turn on its own thread, so a phone connection
     /// dropping mid-turn doesn't cut the turn short — it keeps running and
     /// queues its clips to the outbox regardless of who's listening.
-    pub fn submit(self: &Arc<Self>, text: String) {
+    pub fn submit(self: &Arc<Self>, text: String, source: RequestSource) {
         let session = Arc::clone(self);
-        thread::spawn(move || session.run_turn(&text));
+        thread::spawn(move || session.run_turn(&text, source));
     }
 
     /// Reconnects to Nala if the last connection died, sends `text`, and
@@ -208,7 +208,7 @@ impl VoiceSession {
     /// final reply) to the outbox. Holding `client`'s lock for the whole
     /// turn serializes turns against each other, which is what we want:
     /// one `Assistant` on the Nala side, one turn at a time.
-    fn run_turn(&self, text: &str) {
+    fn run_turn(&self, text: &str, source: RequestSource) {
         self.ensure_connected();
 
         let mut client_slot = self.client.lock().unwrap();
@@ -220,7 +220,7 @@ impl VoiceSession {
         let outbox = &self.outbox;
         let narrator = &self.narrator;
         let synth = &self.synth;
-        let reply = client.send(text, |event: Event| {
+        let reply = client.send(text, source, |event: Event| {
             let phrase = narrator.lock().unwrap().narrate(&event);
             let Some(phrase) = phrase else { return };
             let synthesized = synthesize_to_wav(synth.lock().unwrap().as_ref(), &phrase);

@@ -16,7 +16,7 @@ use nala::{
             registry::ToolRegistry,
         },
     },
-    ports::events::{Event, TurnState},
+    ports::events::{Event, RequestSource, TurnState},
     ports::llm::Usage,
 };
 
@@ -70,6 +70,57 @@ fn executes_tool_requested_by_llm() {
     let result = assistant.process("open chrome");
 
     assert_eq!(result.unwrap(), "chrome opened");
+}
+
+#[test]
+fn process_defaults_to_cli_as_the_request_source() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant.process("open chrome").unwrap();
+
+    match &assistant.events().events[0] {
+        Event::RequestStarted { source, .. } => assert_eq!(*source, RequestSource::Cli),
+        other => panic!("expected RequestStarted, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_from_carries_the_prompt_and_the_given_source() {
+    let events = RecordingEventSink::new();
+    let mut assistant = Assistant::new(
+        FakeLlm::new(),
+        {
+            let tool = ExecuteCommandTool::new(FakeComputer::new());
+            let mut dispatcher = ToolDispatcher::<FakeComputer>::new();
+            dispatcher.register(Tools::ExecuteCommand(tool));
+            dispatcher
+        },
+        registry(),
+        events,
+    );
+
+    assistant
+        .process_from("open chrome", RequestSource::Android)
+        .unwrap();
+
+    match &assistant.events().events[0] {
+        Event::RequestStarted { prompt, source, .. } => {
+            assert_eq!(prompt, "open chrome");
+            assert_eq!(*source, RequestSource::Android);
+        }
+        other => panic!("expected RequestStarted, got {other:?}"),
+    }
 }
 
 #[test]
