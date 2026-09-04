@@ -87,7 +87,17 @@ impl<C: Computer> Capability for OpenUrlTool<C> {
             self.timeout,
         )?;
 
-        Ok(format!("Opened {} in the default browser.", args.url))
+        // `rundll32` is fire-and-forget: it hands the URL to the shell and
+        // returns success almost instantly whether or not a browser window
+        // actually appeared (no default browser configured, or a system
+        // dialog swallowing it, both leave this exit code untouched). The
+        // message must not claim more than `execute_command` verified --
+        // same phrasing as `ExecuteCommandTool`'s own result, so the model
+        // treats this the same way it treats any other unverified mutation.
+        Ok(format!(
+            "The command to open {} ran without an OS-level error. This does not confirm the browser actually opened it -- a missing default browser or a system dialog can fail silently. Verify against the before/after state before answering.",
+            args.url
+        ))
     }
 
     fn parse_arguments(args: &str) -> Result<Self::Args, Self::Error> {
