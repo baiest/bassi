@@ -73,6 +73,32 @@ fn the_success_message_does_not_assert_the_browser_actually_opened() {
 }
 
 #[test]
+fn the_success_message_does_not_assert_the_browser_actually_opened() {
+    // `rundll32 url.dll,FileProtocolHandler` is fire-and-forget: it hands
+    // the URL to the shell and returns 0 almost instantly, whether or not
+    // a browser window actually appears (a missing default browser, or a
+    // system dialog, can silently swallow it). The result text must not
+    // claim a fact `execute()` has no evidence for -- see BAS-58.
+    let computer = FakeComputer::new();
+    let mut tool: OpenUrlTool<FakeComputer> = OpenUrlTool::new(computer);
+
+    let args = OpenUrlArgs {
+        url: "https://youtube.com".to_string(),
+    };
+
+    let result = tool.execute(args).unwrap();
+
+    assert!(
+        !result.contains("Opened https://youtube.com"),
+        "the message must not assert the URL was opened, got: {result:?}"
+    );
+    assert!(
+        result.contains("does not confirm"),
+        "the message must flag that running the command doesn't confirm the outcome, got: {result:?}"
+    );
+}
+
+#[test]
 fn opens_a_plain_http_url() {
     let computer = FakeComputer::new();
     let mut tool: OpenUrlTool<FakeComputer> = OpenUrlTool::new(computer);
