@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use nala::{
     adapters::events::console::ConsoleEventSink,
-    ports::events::{Event, EventSink, LlmCallId, TaskId},
+    ports::events::{Event, EventSink, LlmCallId, RequestSource, TaskId},
 };
 
 #[test]
@@ -11,6 +11,8 @@ fn should_emit_event() {
 
     sink.emit(Event::RequestStarted {
         task_id: TaskId::new(),
+        prompt: "hola".to_string(),
+        source: RequestSource::Cli,
     });
 }
 
@@ -35,5 +37,7 @@ fn should_emit_llm_failed_event() {
         call_index: 1,
         duration: Duration::from_millis(5),
         error: "connection refused".to_string(),
+        provider: "ollama".to_string(),
+        model: "gemma4:12b".to_string(),
     });
 }

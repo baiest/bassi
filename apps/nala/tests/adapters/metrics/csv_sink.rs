@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
-use nala::ports::events::{Event, EventSink, LlmCallId, TaskId};
+use nala::ports::events::{Event, EventSink, LlmCallId, RequestSource, TaskId};
 
 use crate::fake_events::RecordingEventSink;
 
@@ -42,17 +42,14 @@ fn read_csv(path: &Path) -> Vec<Vec<String>> {
 }
 
 fn sink(dir: &Path) -> CsvMetricsSink<RecordingEventSink> {
-    CsvMetricsSink::new(
-        RecordingEventSink::new(),
-        Some(dir.to_path_buf()),
-        "ollama",
-        "gemma4:12b",
-    )
+    CsvMetricsSink::new(RecordingEventSink::new(), Some(dir.to_path_buf()))
 }
 
 fn started(task_id: &TaskId) -> Event {
     Event::RequestStarted {
         task_id: task_id.clone(),
+        prompt: "hola".to_string(),
+        source: RequestSource::Cli,
     }
 }
 
@@ -60,6 +57,7 @@ fn completed(task_id: &TaskId, ms: u64) -> Event {
     Event::RequestCompleted {
         task_id: task_id.clone(),
         duration: Duration::from_millis(ms),
+        reply: "listo".to_string(),
     }
 }
 
@@ -77,12 +75,16 @@ fn llm_call(
             llm_call_id: llm_call_id.clone(),
             call_index,
             images: 0,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         },
         Event::LlmCompleted {
             task_id: task_id.clone(),
             llm_call_id: llm_call_id.clone(),
             call_index,
             duration: Duration::from_millis(latency_ms),
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         },
         Event::TokensUsed {
             task_id: task_id.clone(),
@@ -211,6 +213,8 @@ fn tool_calls_are_tagged_with_their_tasks_id() {
         duration: Duration::from_millis(15),
         output: "ok".to_string(),
         images: 0,
+        arguments: "{}".to_string(),
+        mutated: true,
     });
     sink.emit(completed(&task_id, 50));
 
@@ -266,6 +270,8 @@ fn a_failed_llm_call_is_recorded_with_its_error() {
         llm_call_id: llm_call_id.clone(),
         call_index: 1,
         images: 0,
+        provider: "ollama".to_string(),
+        model: "gemma4:12b".to_string(),
     });
     sink.emit(Event::LlmFailed {
         task_id: task_id.clone(),
@@ -273,10 +279,14 @@ fn a_failed_llm_call_is_recorded_with_its_error() {
         call_index: 1,
         duration: Duration::from_millis(30),
         error: "connection refused".to_string(),
+        provider: "ollama".to_string(),
+        model: "gemma4:12b".to_string(),
     });
 
     let rows = read_csv(&dir.join("llm_calls.csv"));
     let row = &rows[1];
+    assert_eq!(row[4], "ollama");
+    assert_eq!(row[5], "gemma4:12b");
     assert_eq!(row[6], ""); // input_tokens unknown
     assert_eq!(row[7], ""); // output_tokens unknown
     assert_eq!(row[8], ""); // total_tokens unknown
@@ -304,6 +314,8 @@ fn a_failing_tool_call_is_recorded_and_the_task_still_completes() {
         duration: Duration::from_millis(5),
         output: "ERROR: boom".to_string(),
         images: 0,
+        arguments: "{}".to_string(),
+        mutated: false,
     });
     sink.emit(completed(&task_id, 20));
 
@@ -429,7 +441,7 @@ fn dropping_the_sink_flushes_the_last_abandoned_task() {
 
 #[test]
 fn without_a_configured_directory_nothing_is_written_and_events_still_forward() {
-    let mut sink = CsvMetricsSink::new(RecordingEventSink::new(), None, "ollama", "gemma4:12b");
+    let mut sink = CsvMetricsSink::new(RecordingEventSink::new(), None);
     let task_id = TaskId::new();
 
     sink.emit(started(&task_id));

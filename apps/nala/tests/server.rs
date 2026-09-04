@@ -172,7 +172,7 @@ fn a_served_session_writes_a_task_row_to_the_metrics_csv() {
     let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
         text: "hola".to_string(),
     }])));
-    let events = build_events(Arc::clone(&wire), Some(dir.clone()), "ollama", "gemma4:12b");
+    let events = build_events(Arc::clone(&wire), Some(dir.clone()));
 
     let mut registry = ToolRegistry::new();
     registry.register(ExecuteCommandTool::<FakeComputer>::definition().into());

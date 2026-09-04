@@ -76,6 +76,12 @@ pub struct Assistant<L, D, E> {
     /// Identity and per-call counters for the task currently in
     /// `process()`. Reset at the start of every call.
     pub(crate) current_task: TaskState,
+    /// Labels attached to every `LlmStarted`/`LlmCompleted`/`LlmFailed`
+    /// event, since `Llm` itself doesn't expose them (Nala wires exactly
+    /// one per run). Set via `with_llm_info`; `bootstrap.rs` fills in the
+    /// real values.
+    pub(crate) provider: String,
+    pub(crate) model: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,7 +128,15 @@ where
             planning_enabled: true,
             memory: Box::new(InMemoryMemoryStore::new()),
             current_task: TaskState::default(),
+            provider: "unknown".to_string(),
+            model: "unknown".to_string(),
         }
+    }
+
+    pub fn with_llm_info(mut self, provider: impl Into<String>, model: impl Into<String>) -> Self {
+        self.provider = provider.into();
+        self.model = model.into();
+        self
     }
 
     pub fn with_planning_enabled(mut self, planning_enabled: bool) -> Self {

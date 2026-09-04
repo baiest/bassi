@@ -192,12 +192,16 @@ fn narration_audio_is_sent_before_the_reply_audio() {
     let nala_addr = spawn_fake_nala(vec![vec![
         ServerMessage::Event(Event::RequestStarted {
             task_id: task.clone(),
+            prompt: "hola".to_string(),
+            source: agent_protocol::RequestSource::Voice,
         }),
         ServerMessage::Event(Event::LlmStarted {
             llm_call_id: LlmCallId::new(&task, 1),
             task_id: task,
             call_index: 1,
             images: 0,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         }),
         ServerMessage::Reply {
             text: "listo".to_string(),

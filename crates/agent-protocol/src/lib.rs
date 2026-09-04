@@ -81,10 +81,28 @@ pub enum TurnState {
     Responding,
 }
 
+/// Where a request originated, for per-client metrics breakdown. Carried on
+/// `ClientMessage::Input` and `Event::RequestStarted` — see
+/// `apps/voice/src/session.rs` for why it has to travel in the message
+/// rather than being inferred from the connection (one shared Nala
+/// connection serves every client).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestSource {
+    Cli,
+    Overlay,
+    Android,
+    Voice,
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     RequestStarted {
         task_id: TaskId,
+        prompt: String,
+        source: RequestSource,
     },
     StateChanged {
         task_id: TaskId,
@@ -93,6 +111,7 @@ pub enum Event {
     RequestCompleted {
         task_id: TaskId,
         duration: Duration,
+        reply: String,
     },
     RequestFailed {
         task_id: TaskId,
@@ -119,12 +138,16 @@ pub enum Event {
         /// (e.g. a screenshot from an earlier tool result), so it's visible
         /// from the outside that an image actually reached the model.
         images: usize,
+        provider: String,
+        model: String,
     },
     LlmCompleted {
         task_id: TaskId,
         llm_call_id: LlmCallId,
         call_index: u32,
         duration: Duration,
+        provider: String,
+        model: String,
     },
     /// A single LLM call failed — as opposed to `RequestFailed`, which marks
     /// the whole task giving up. One task can retry several failed calls
@@ -136,6 +159,8 @@ pub enum Event {
         call_index: u32,
         duration: Duration,
         error: String,
+        provider: String,
+        model: String,
     },
 
     ToolStarted {
@@ -154,6 +179,8 @@ pub enum Event {
         output: String,
         /// How many images the tool result carried (e.g. a screenshot).
         images: usize,
+        arguments: String,
+        mutated: bool,
     },
 
     /// A retryable LLM failure is about to be retried after a backoff
@@ -329,6 +356,104 @@ mod tests {
     }
 
     #[test]
+    fn request_started_carries_the_prompt_and_its_source() {
+        let task_id = TaskId::new();
+        let event = Event::RequestStarted {
+            task_id: task_id.clone(),
+            prompt: "hola nala".to_string(),
+            source: RequestSource::Android,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            Event::RequestStarted {
+                task_id: decoded_task_id,
+                prompt,
+                source,
+            } => {
+                assert_eq!(decoded_task_id, task_id);
+                assert_eq!(prompt, "hola nala");
+                assert_eq!(source, RequestSource::Android);
+            }
+            _ => panic!("expected RequestStarted"),
+        }
+    }
+
+    #[test]
+    fn llm_started_carries_the_provider_and_model() {
+        let task_id = TaskId::new();
+        let event = Event::LlmStarted {
+            llm_call_id: LlmCallId::new(&task_id, 1),
+            task_id,
+            call_index: 1,
+            images: 0,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            Event::LlmStarted {
+                provider, model, ..
+            } => {
+                assert_eq!(provider, "ollama");
+                assert_eq!(model, "gemma4:12b");
+            }
+            _ => panic!("expected LlmStarted"),
+        }
+    }
+
+    #[test]
+    fn tool_completed_carries_its_arguments_and_whether_it_mutated_anything() {
+        let task_id = TaskId::new();
+        let event = Event::ToolCompleted {
+            task_id,
+            tool_call_index: 1,
+            name: "get_weather".to_string(),
+            duration: Duration::from_millis(10),
+            output: "sunny".to_string(),
+            images: 0,
+            arguments: "{\"city\":\"Cali\"}".to_string(),
+            mutated: false,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            Event::ToolCompleted {
+                arguments, mutated, ..
+            } => {
+                assert_eq!(arguments, "{\"city\":\"Cali\"}");
+                assert!(!mutated);
+            }
+            _ => panic!("expected ToolCompleted"),
+        }
+    }
+
+    #[test]
+    fn request_completed_carries_the_final_reply_text() {
+        let task_id = TaskId::new();
+        let event = Event::RequestCompleted {
+            task_id,
+            duration: Duration::from_millis(10),
+            reply: "listo".to_string(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: Event = serde_json::from_str(&json).unwrap();
+
+        match decoded {
+            Event::RequestCompleted { reply, .. } => assert_eq!(reply, "listo"),
+            _ => panic!("expected RequestCompleted"),
+        }
+    }
+
+    #[test]
     fn server_message_event_with_a_payload_round_trips_through_json() {
         let task_id = TaskId::new();
         let event = Event::LlmStarted {
@@ -336,6 +461,8 @@ mod tests {
             task_id: task_id.clone(),
             call_index: 1,
             images: 2,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         };
 
         let json = serde_json::to_string(&ServerMessage::Event(event)).unwrap();

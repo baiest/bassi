@@ -136,6 +136,8 @@ fn does_not_narrate_noisy_bookkeeping_events() {
             llm_call_id: llm_call_id(),
             call_index: 1,
             images: 0,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         }),
         None
     );
@@ -145,6 +147,8 @@ fn does_not_narrate_noisy_bookkeeping_events() {
             llm_call_id: llm_call_id(),
             call_index: 1,
             duration: Duration::from_millis(1),
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         }),
         None
     );
@@ -174,6 +178,8 @@ fn narrates_a_failed_tool_result_but_not_a_successful_one() {
         duration: Duration::from_millis(1),
         output: "did the thing".to_string(),
         images: 0,
+        arguments: "{}".to_string(),
+        mutated: false,
     });
     assert_eq!(ok, None);
 
@@ -184,6 +190,8 @@ fn narrates_a_failed_tool_result_but_not_a_successful_one() {
         duration: Duration::from_millis(1),
         output: "ERROR: boom".to_string(),
         images: 0,
+        arguments: "{}".to_string(),
+        mutated: false,
     });
     assert!(failed.is_some());
 }
