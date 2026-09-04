@@ -2,13 +2,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
+use nala::adapters::autonomous::in_memory_queue::InMemoryEventQueue;
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
 use nala::adapters::metrics::jsonl_sink::JsonlMetricsSink;
+use nala::application::autonomous::event_loop::AutonomousEventLoop;
+use nala::application::autonomous::policy::RuleBasedPolicy;
 use nala::application::devices::registry::DeviceRegistry;
 use nala::application::metrics_report::{PricingTable, build_report, parse_events};
 use nala::bootstrap;
 use nala::cli::prompt::MultilineReader;
+use nala::ports::autonomous::AutonomousEventQueue;
 
 /// Default pricing table path, overridable with `NALA_PRICING_FILE`.
 const DEFAULT_PRICING_FILE: &str = "config/pricing.json";
@@ -23,6 +27,11 @@ const DEFAULT_ADDR: &str = "127.0.0.1:4180";
 /// `NALA_DEVICE_ADDR`. Loopback-only for the same reason as `DEFAULT_ADDR`
 /// — a connected device can run `execute_command`.
 const DEFAULT_DEVICE_ADDR: &str = "127.0.0.1:4182";
+
+/// How many autonomous events (device reports, ...) may wait in the queue
+/// before new ones are dropped. Sized generously for one process's worth
+/// of devices, not for durability -- see `InMemoryEventQueue`.
+const AUTONOMOUS_EVENT_QUEUE_CAPACITY: usize = 256;
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("metrics") {
@@ -53,13 +62,41 @@ fn main() {
 
         let devices = Arc::new(DeviceRegistry::new());
 
+        // Autonomous events (device reports, connect/disconnect, and
+        // eventually timers/Home Assistant) flow through this queue into
+        // `AutonomousEventLoop`, which reuses the same `Assistant` machinery
+        // as every other entry point -- see `application::autonomous`.
+        let autonomous_events: Arc<dyn AutonomousEventQueue> =
+            Arc::new(InMemoryEventQueue::new(AUTONOMOUS_EVENT_QUEUE_CAPACITY));
+
         let device_server_devices = Arc::clone(&devices);
+        let device_server_events = Arc::clone(&autonomous_events);
         thread::spawn(move || {
-            if let Err(error) =
-                nala::device_server::serve(&device_addr, device_server_devices, device_token)
-            {
+            if let Err(error) = nala::device_server::serve(
+                &device_addr,
+                device_server_devices,
+                device_token,
+                Some(device_server_events),
+            ) {
                 eprintln!("Error: could not start the device server on {device_addr}: {error}");
             }
+        });
+
+        let autonomous_devices = Arc::clone(&devices);
+        let autonomous_metrics_dir = metrics_dir.clone();
+        thread::spawn(move || {
+            let events = ConsoleEventSink;
+            let events = JsonlMetricsSink::new(events, autonomous_metrics_dir.clone());
+            let events = CsvMetricsSink::new(events, autonomous_metrics_dir);
+            let agent = bootstrap::build_assistant(events, autonomous_devices);
+
+            let mut event_loop = AutonomousEventLoop::new(
+                autonomous_events,
+                RuleBasedPolicy::default_kinds(),
+                agent,
+                ConsoleEventSink,
+            );
+            event_loop.run();
         });
 
         if let Err(error) = nala::server::serve(&addr, devices, metrics_dir) {
