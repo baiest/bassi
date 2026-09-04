@@ -1066,6 +1066,13 @@ fn every_event_in_a_task_shares_the_same_task_id() {
             Event::Greeting { .. } => {
                 panic!("Assistant::process never emits Greeting")
             }
+            Event::AutonomousEventReceived { .. }
+            | Event::AutonomousEventIgnored { .. }
+            | Event::AutonomousEventDelegated { .. }
+            | Event::AutonomousEventCompleted { .. }
+            | Event::AutonomousEventFailed { .. } => {
+                panic!("Assistant::process never emits autonomous events")
+            }
         }
     }
 
