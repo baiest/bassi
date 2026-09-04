@@ -20,7 +20,17 @@ impl Process for FakeProcess {
 
 pub struct FakeComputer {
     pub executed_command: Option<String>,
+    /// Every command passed to `execute_command`, in order -- unlike
+    /// `executed_command` (only the last one), this lets a test assert a
+    /// capability tried more than one command (e.g. a fallback after the
+    /// first one failed).
+    pub commands_run: Vec<String>,
     pub should_fail: bool,
+    /// When set, a command is only rejected if it contains this substring
+    /// -- everything else still succeeds. Lets a test simulate one
+    /// specific launch method failing (e.g. `start`) while another (e.g.
+    /// `rundll32`) still works, without failing every command outright.
+    pub fail_when_command_contains: Option<String>,
     pub should_fail_context: bool,
     pub output: String,
 }
@@ -29,7 +39,9 @@ impl FakeComputer {
     pub fn new() -> Self {
         Self {
             executed_command: None,
+            commands_run: Vec::new(),
             should_fail: false,
+            fail_when_command_contains: None,
             should_fail_context: false,
             output: String::new(),
         }
@@ -47,8 +59,16 @@ impl Computer for FakeComputer {
                 "fake computer failed".to_string(),
             ));
         }
+        if let Some(needle) = &self.fail_when_command_contains
+            && name.contains(needle.as_str())
+        {
+            return Err(ComputerError::CommandFailed(format!(
+                "fake computer failed: {name}"
+            )));
+        }
 
         self.executed_command = Some(name.to_string());
+        self.commands_run.push(name.to_string());
 
         Ok(self.output.clone())
     }
