@@ -20,7 +20,7 @@ fn a_connecting_client_receives_the_greeting_before_anything_else() {
     let addr = "127.0.0.1:41824".to_string();
     let server_addr = addr.clone();
     thread::spawn(move || {
-        serve(&server_addr, devices).expect("nala server should bind");
+        serve(&server_addr, devices, None, "gemma4:12b").expect("nala server should bind");
     });
 
     let mut client = connect(&addr);

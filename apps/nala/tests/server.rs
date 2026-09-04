@@ -22,7 +22,7 @@ use fake_llm::{AlwaysRepliesTextLlm, FailingLlm};
 use nala::application::assistant::Assistant;
 use nala::application::tools::dispatcher::{ToolDispatcher, Tools};
 use nala::application::tools::registry::ToolRegistry;
-use nala::server::{Wire, WsEventSink, run_session};
+use nala::server::{Wire, WsEventSink, build_events, run_session};
 
 /// An in-memory `Wire`: `recv()` pops scripted client messages (`None` once
 /// exhausted, simulating the client disconnecting) and `send()` records
@@ -145,6 +145,52 @@ fn the_session_loop_ends_when_the_client_disconnects() {
     run_session(assistant, Arc::clone(&wire));
 
     assert!(wire.lock().unwrap().sent.is_empty());
+}
+
+/// A fresh, unique temp directory per test, mirroring the helper in
+/// `tests/adapters/metrics/csv_sink.rs`.
+fn temp_dir() -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "nala_server_metrics_test_{}_{n}_{:?}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+/// Regression test for the bug where `nala --serve` never wired
+/// `CsvMetricsSink`, so every real request (overlay, Android, voice) left
+/// no trace in `data/metrics/*.csv` — only the local CLI REPL did. This
+/// checks the same `build_events` helper `handle_connection` uses.
+#[test]
+fn a_served_session_writes_a_task_row_to_the_metrics_csv() {
+    let dir = temp_dir();
+    let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
+        text: "hola".to_string(),
+    }])));
+    let events = build_events(Arc::clone(&wire), Some(dir.clone()), "ollama", "gemma4:12b");
+
+    let mut registry = ToolRegistry::new();
+    registry.register(ExecuteCommandTool::<FakeComputer>::definition().into());
+    let mut dispatcher: ToolDispatcher<FakeComputer> = ToolDispatcher::new();
+    dispatcher.register(Tools::ExecuteCommand(ExecuteCommandTool::new(
+        FakeComputer::new(),
+    )));
+    let assistant = Assistant::new(AlwaysRepliesTextLlm::new(), dispatcher, registry, events);
+
+    run_session(assistant, Arc::clone(&wire));
+
+    let tasks_csv = std::fs::read_to_string(dir.join("tasks.csv"))
+        .unwrap_or_else(|error| panic!("expected tasks.csv to be written: {error}"));
+    assert_eq!(
+        tasks_csv.lines().count(),
+        2,
+        "expected a header plus one task row, got:\n{tasks_csv}"
+    );
 }
 
 #[test]

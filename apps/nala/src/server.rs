@@ -6,6 +6,7 @@
 
 use std::io;
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -13,6 +14,7 @@ use agent_protocol::{ClientMessage, Event, EventSink, ServerMessage};
 use tungstenite::{Message, WebSocket};
 
 use crate::adapters::events::console::ConsoleEventSink;
+use crate::adapters::metrics::csv_sink::CsvMetricsSink;
 use crate::application::assistant::Assistant;
 use crate::application::devices::registry::DeviceRegistry;
 use crate::bootstrap;
@@ -150,7 +152,27 @@ pub fn run_session<L, D, E, W>(
     }
 }
 
-fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
+/// Builds one connection's event sink: same wrap-and-forward chain as the
+/// local REPL (`main.rs`) — `CsvMetricsSink` for token/duration accounting,
+/// wrapped in `WsEventSink` to also stream progress to the client. Used by
+/// `handle_connection`, and exposed for tests since `handle_connection`
+/// itself needs a real `TcpStream`.
+pub fn build_events<W: Wire>(
+    wire: Arc<Mutex<W>>,
+    metrics_dir: Option<PathBuf>,
+    provider: impl Into<String>,
+    model: impl Into<String>,
+) -> WsEventSink<CsvMetricsSink<ConsoleEventSink>, W> {
+    let inner = CsvMetricsSink::new(ConsoleEventSink, metrics_dir, provider, model);
+    WsEventSink::new(inner, wire)
+}
+
+fn handle_connection(
+    stream: TcpStream,
+    devices: Arc<DeviceRegistry<Device>>,
+    metrics_dir: Option<PathBuf>,
+    model: &str,
+) {
     let ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
         Err(error) => {
@@ -160,7 +182,7 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
     };
 
     let wire = Arc::new(Mutex::new(ws));
-    let mut events = WsEventSink::new(ConsoleEventSink, Arc::clone(&wire));
+    let mut events = build_events(Arc::clone(&wire), metrics_dir, "ollama", model);
     // Emitted through the normal event pipe (not sent directly over `wire`)
     // so it's logged by `ConsoleEventSink` the same as any other event.
     events.emit(Event::Greeting {
@@ -182,7 +204,12 @@ fn handle_connection(stream: TcpStream, devices: Arc<DeviceRegistry<Device>>) {
 /// on its own thread, forever. `devices` is shared with the device server
 /// (`device_server::serve`, on a different port) so every new turn-client
 /// connection sees whatever devices are currently connected.
-pub fn serve(addr: &str, devices: Arc<DeviceRegistry<Device>>) -> io::Result<()> {
+pub fn serve(
+    addr: &str,
+    devices: Arc<DeviceRegistry<Device>>,
+    metrics_dir: Option<PathBuf>,
+    model: &str,
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("Nala listening on ws://{addr}");
 
@@ -190,7 +217,9 @@ pub fn serve(addr: &str, devices: Arc<DeviceRegistry<Device>>) -> io::Result<()>
         match stream {
             Ok(stream) => {
                 let devices = Arc::clone(&devices);
-                thread::spawn(move || handle_connection(stream, devices));
+                let metrics_dir = metrics_dir.clone();
+                let model = model.to_string();
+                thread::spawn(move || handle_connection(stream, devices, metrics_dir, &model));
             }
             Err(error) => eprintln!("Warning: failed to accept a connection: {error}"),
         }
