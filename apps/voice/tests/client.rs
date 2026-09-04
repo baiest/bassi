@@ -108,12 +108,16 @@ fn invokes_the_callback_for_every_event_before_the_reply() {
     let wire = FakeWire::new(vec![
         ServerMessage::Event(Event::RequestStarted {
             task_id: task_id.clone(),
+            prompt: "hola".to_string(),
+            source: agent_protocol::RequestSource::Voice,
         }),
         ServerMessage::Event(Event::LlmStarted {
             llm_call_id: LlmCallId::new(&task_id, 1),
             task_id: task_id.clone(),
             call_index: 1,
             images: 0,
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         }),
         ServerMessage::Reply {
             text: "listo".to_string(),

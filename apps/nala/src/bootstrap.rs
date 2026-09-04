@@ -182,6 +182,7 @@ pub fn build_assistant<E: EventSink>(
     Assistant::new(llm, dispatcher, registry, events)
         .with_planning_enabled(std::env::var("NALA_PLANNING").as_deref() == Ok("on"))
         .with_memory(Box::new(FileMemoryStore::new(memory_path())))
+        .with_llm_info("ollama", model)
 }
 
 /// One server entry parsed out of the MCP config JSON.

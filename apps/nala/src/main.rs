@@ -5,7 +5,7 @@ use std::thread;
 use nala::adapters::events::console::ConsoleEventSink;
 use nala::adapters::metrics::csv_sink::CsvMetricsSink;
 use nala::application::devices::registry::DeviceRegistry;
-use nala::bootstrap::{self, DEFAULT_MODEL};
+use nala::bootstrap;
 use nala::cli::prompt::MultilineReader;
 
 /// Default bind address for `nala --serve`, overridable with `NALA_ADDR`.
@@ -36,7 +36,6 @@ fn main() {
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("data/metrics")),
         );
-        let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
 
         let devices = Arc::new(DeviceRegistry::new());
 
@@ -49,7 +48,7 @@ fn main() {
             }
         });
 
-        if let Err(error) = nala::server::serve(&addr, devices, metrics_dir, &model) {
+        if let Err(error) = nala::server::serve(&addr, devices, metrics_dir) {
             eprintln!("Error: could not start the server on {addr}: {error}");
             std::process::exit(1);
         }
@@ -64,8 +63,7 @@ fn main() {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data/metrics")),
     );
-    let model = std::env::var("NALA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-    let events = CsvMetricsSink::new(events, metrics_dir, "ollama", &model);
+    let events = CsvMetricsSink::new(events, metrics_dir);
 
     // The local REPL has no device server running, so no device is ever
     // connected — an empty registry, not a special case in `build_assistant`.

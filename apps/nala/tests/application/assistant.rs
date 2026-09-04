@@ -996,7 +996,7 @@ fn every_event_in_a_task_shares_the_same_task_id() {
 
     fn task_id_of(event: &Event) -> &nala::ports::events::TaskId {
         match event {
-            Event::RequestStarted { task_id }
+            Event::RequestStarted { task_id, .. }
             | Event::StateChanged { task_id, .. }
             | Event::RequestCompleted { task_id, .. }
             | Event::RequestFailed { task_id, .. }
@@ -1047,7 +1047,7 @@ fn two_process_calls_produce_distinct_task_ids() {
 
     assistant.process("open chrome").unwrap();
     let first_task_id = match &assistant.events().events[0] {
-        Event::RequestStarted { task_id } => task_id.clone(),
+        Event::RequestStarted { task_id, .. } => task_id.clone(),
         other => panic!("expected RequestStarted, got {other:?}"),
     };
 
@@ -1059,7 +1059,7 @@ fn two_process_calls_produce_distinct_task_ids() {
         .find(|event| matches!(event, Event::RequestStarted { .. }))
         .unwrap()
     {
-        Event::RequestStarted { task_id } => task_id.clone(),
+        Event::RequestStarted { task_id, .. } => task_id.clone(),
         _ => unreachable!(),
     };
 
@@ -1122,7 +1122,7 @@ fn tool_events_carry_the_task_id_and_a_sequential_tool_call_index() {
     assert_eq!(result.unwrap(), "done");
 
     let started_task_id = match &assistant.events().events[0] {
-        Event::RequestStarted { task_id } => task_id.clone(),
+        Event::RequestStarted { task_id, .. } => task_id.clone(),
         other => panic!("expected RequestStarted, got {other:?}"),
     };
 
@@ -1232,12 +1232,7 @@ fn csv_metrics_sink_records_a_real_task_end_to_end() {
         prompt_tokens: Some(42),
         completion_tokens: Some(17),
     };
-    let events = CsvMetricsSink::new(
-        RecordingEventSink::new(),
-        Some(dir.clone()),
-        "ollama",
-        "gemma4:12b",
-    );
+    let events = CsvMetricsSink::new(RecordingEventSink::new(), Some(dir.clone()));
 
     let tool = ExecuteCommandTool::new(FakeComputer::new());
     let mut dispatcher = ToolDispatcher::<FakeComputer>::new();

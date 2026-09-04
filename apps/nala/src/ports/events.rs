@@ -3,4 +3,6 @@
 //! Nala over a connection — re-exported here so existing call sites inside
 //! this crate don't need to change.
 
-pub use agent_protocol::{BudgetStep, Event, EventSink, LlmCallId, TaskId, TurnState};
+pub use agent_protocol::{
+    BudgetStep, Event, EventSink, LlmCallId, RequestSource, TaskId, TurnState,
+};

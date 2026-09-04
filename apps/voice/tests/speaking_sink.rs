@@ -73,6 +73,8 @@ fn forwards_every_event_to_the_inner_sink_unchanged() {
 
     sink.emit(Event::RequestStarted {
         task_id: TaskId::new(),
+        prompt: "hola".to_string(),
+        source: agent_protocol::RequestSource::Unknown,
     });
     sink.emit(Event::Cancelled {
         task_id: TaskId::new(),
@@ -97,6 +99,8 @@ fn speaks_the_phrase_the_narrator_returns() {
     let mut sink = SpeakingEventSink::new(recorder, narrator, speech.clone());
     sink.emit(Event::RequestStarted {
         task_id: TaskId::new(),
+        prompt: "hola".to_string(),
+        source: agent_protocol::RequestSource::Unknown,
     });
     speech.flush();
 
@@ -118,6 +122,8 @@ fn stays_silent_when_the_narrator_has_nothing_to_say() {
         task_id,
         call_index: 1,
         images: 0,
+        provider: "ollama".to_string(),
+        model: "gemma4:12b".to_string(),
     });
     speech.flush();
 
@@ -145,6 +151,8 @@ fn narration_uses_the_disposable_path_not_the_never_drop_one() {
             task_id,
             call_index: i,
             duration: std::time::Duration::from_millis(1),
+            provider: "ollama".to_string(),
+            model: "gemma4:12b".to_string(),
         });
     }
 

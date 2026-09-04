@@ -9,7 +9,9 @@ use crate::application::assistant::{
     tool_result_message, user_message,
 };
 use crate::application::context_budget;
-use crate::ports::events::{BudgetStep, Event, EventSink, LlmCallId, TaskId, TurnState};
+use crate::ports::events::{
+    BudgetStep, Event, EventSink, LlmCallId, RequestSource, TaskId, TurnState,
+};
 use crate::ports::llm::{Llm, LlmError, LlmResponse, Message, ToolCall};
 use crate::ports::tool::ToolDefinition;
 use crate::ports::tool_dispatcher::{ToolDispatcher, ToolOutcome};
@@ -87,6 +89,11 @@ where
 
         self.events.emit(Event::RequestStarted {
             task_id: self.task_id(),
+            prompt: input.to_string(),
+            // The transport-level source (CLI/overlay/android/voice) isn't
+            // threaded through `process()` yet — a later change carries it
+            // from `ClientMessage::Input` down to here.
+            source: RequestSource::Unknown,
         });
         self.set_state(TurnState::Receiving);
 
@@ -182,7 +189,7 @@ where
                         task_id: self.task_id(),
                         tool_call_index: tool_call_count as u32,
                         name: tool_name.clone(),
-                        arguments: tool_args,
+                        arguments: tool_args.clone(),
                     });
 
                     let start = Instant::now();
@@ -207,6 +214,8 @@ where
                         duration,
                         output: outcome.text.clone(),
                         images: outcome.images.len(),
+                        arguments: tool_args.clone(),
+                        mutated: outcome.mutated,
                     });
 
                     // A mutating call leaves the turn unverified; any call
@@ -278,6 +287,7 @@ where
                     self.events.emit(Event::RequestCompleted {
                         task_id: self.task_id(),
                         duration,
+                        reply: text.clone(),
                     });
 
                     break Ok(text);
@@ -365,6 +375,8 @@ where
             llm_call_id: llm_call_id.clone(),
             call_index,
             images: outgoing_images,
+            provider: self.provider.clone(),
+            model: self.model.clone(),
         });
 
         let start = Instant::now();
@@ -378,6 +390,8 @@ where
                     llm_call_id: llm_call_id.clone(),
                     call_index,
                     duration,
+                    provider: self.provider.clone(),
+                    model: self.model.clone(),
                 });
                 self.events.emit(Event::TokensUsed {
                     task_id,
@@ -394,6 +408,8 @@ where
                     call_index,
                     duration,
                     error: error.to_string(),
+                    provider: self.provider.clone(),
+                    model: self.model.clone(),
                 });
             }
             // No event here: cancellation is reported once, by whichever

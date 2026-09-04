@@ -60,6 +60,8 @@ struct PendingLlmCompletion {
     task_id: TaskId,
     llm_call_id: LlmCallId,
     duration: Duration,
+    provider: String,
+    model: String,
 }
 
 /// Parameters for one `llm_calls.csv` row — grouped into a struct rather
@@ -69,6 +71,8 @@ struct LlmCallRow<'a> {
     task_id: &'a TaskId,
     llm_call_id: &'a LlmCallId,
     call_index: u32,
+    provider: &'a str,
+    model: &'a str,
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
     total_tokens: Option<u32>,
@@ -123,30 +127,21 @@ impl TaskAccumulator {
 ///
 /// I/O failures are swallowed (a warning printed once per failed write,
 /// never propagated): the metrics system must never be able to break a
-/// real task. `provider`/`model` are static, caller-supplied labels (Nala
-/// wires exactly one `Llm` per run) rather than something read off
-/// `Event`, since the event stream doesn't carry that — see `main.rs`.
+/// real task. `provider`/`model` come off each `LlmStarted`/`LlmCompleted`
+/// event rather than being fixed at construction, so a future run that
+/// mixes backends still gets a correct label per row.
 pub struct CsvMetricsSink<E> {
     inner: E,
     dir: Option<PathBuf>,
-    provider: String,
-    model: String,
     tasks: HashMap<TaskId, TaskAccumulator>,
     pending_llm_completion: Option<PendingLlmCompletion>,
 }
 
 impl<E> CsvMetricsSink<E> {
-    pub fn new(
-        inner: E,
-        dir: Option<PathBuf>,
-        provider: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Self {
+    pub fn new(inner: E, dir: Option<PathBuf>) -> Self {
         Self {
             inner,
             dir,
-            provider: provider.into(),
-            model: model.into(),
             tasks: HashMap::new(),
             pending_llm_completion: None,
         }
@@ -177,8 +172,8 @@ impl<E> CsvMetricsSink<E> {
             call.task_id.to_string(),
             call.llm_call_id.to_string(),
             call.call_index.to_string(),
-            self.provider.clone(),
-            self.model.clone(),
+            call.provider.to_string(),
+            call.model.to_string(),
             opt_to_string(call.input_tokens),
             opt_to_string(call.output_tokens),
             opt_to_string(call.total_tokens),
@@ -293,6 +288,8 @@ impl<E> CsvMetricsSink<E> {
             task_id,
             llm_call_id,
             call_index,
+            provider: &pending.provider,
+            model: &pending.model,
             input_tokens: prompt_tokens,
             output_tokens: completion_tokens,
             total_tokens,
@@ -311,7 +308,7 @@ impl<E> CsvMetricsSink<E> {
 
     fn record(&mut self, event: &Event) {
         match event {
-            Event::RequestStarted { task_id } => {
+            Event::RequestStarted { task_id, .. } => {
                 self.flush_abandoned(Some(task_id));
                 self.tasks.insert(task_id.clone(), TaskAccumulator::new());
             }
@@ -319,12 +316,16 @@ impl<E> CsvMetricsSink<E> {
                 task_id,
                 llm_call_id,
                 duration,
+                provider,
+                model,
                 ..
             } => {
                 self.pending_llm_completion = Some(PendingLlmCompletion {
                     task_id: task_id.clone(),
                     llm_call_id: llm_call_id.clone(),
                     duration: *duration,
+                    provider: provider.clone(),
+                    model: model.clone(),
                 });
             }
             Event::TokensUsed {
@@ -348,11 +349,15 @@ impl<E> CsvMetricsSink<E> {
                 call_index,
                 duration,
                 error,
+                provider,
+                model,
             } => {
                 self.write_llm_call_row(LlmCallRow {
                     task_id,
                     llm_call_id,
                     call_index: *call_index,
+                    provider,
+                    model,
                     input_tokens: None,
                     output_tokens: None,
                     total_tokens: None,

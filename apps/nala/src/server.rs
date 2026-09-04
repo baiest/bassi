@@ -160,10 +160,8 @@ pub fn run_session<L, D, E, W>(
 pub fn build_events<W: Wire>(
     wire: Arc<Mutex<W>>,
     metrics_dir: Option<PathBuf>,
-    provider: impl Into<String>,
-    model: impl Into<String>,
 ) -> WsEventSink<CsvMetricsSink<ConsoleEventSink>, W> {
-    let inner = CsvMetricsSink::new(ConsoleEventSink, metrics_dir, provider, model);
+    let inner = CsvMetricsSink::new(ConsoleEventSink, metrics_dir);
     WsEventSink::new(inner, wire)
 }
 
@@ -171,7 +169,6 @@ fn handle_connection(
     stream: TcpStream,
     devices: Arc<DeviceRegistry<Device>>,
     metrics_dir: Option<PathBuf>,
-    model: &str,
 ) {
     let ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
@@ -182,7 +179,7 @@ fn handle_connection(
     };
 
     let wire = Arc::new(Mutex::new(ws));
-    let mut events = build_events(Arc::clone(&wire), metrics_dir, "ollama", model);
+    let mut events = build_events(Arc::clone(&wire), metrics_dir);
     // Emitted through the normal event pipe (not sent directly over `wire`)
     // so it's logged by `ConsoleEventSink` the same as any other event.
     events.emit(Event::Greeting {
@@ -208,7 +205,6 @@ pub fn serve(
     addr: &str,
     devices: Arc<DeviceRegistry<Device>>,
     metrics_dir: Option<PathBuf>,
-    model: &str,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("Nala listening on ws://{addr}");
@@ -218,8 +214,7 @@ pub fn serve(
             Ok(stream) => {
                 let devices = Arc::clone(&devices);
                 let metrics_dir = metrics_dir.clone();
-                let model = model.to_string();
-                thread::spawn(move || handle_connection(stream, devices, metrics_dir, &model));
+                thread::spawn(move || handle_connection(stream, devices, metrics_dir));
             }
             Err(error) => eprintln!("Warning: failed to accept a connection: {error}"),
         }
