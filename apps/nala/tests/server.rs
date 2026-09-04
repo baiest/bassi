@@ -91,6 +91,7 @@ fn only_reply_and_event_messages(sent: &[ServerMessage]) -> (usize, usize) {
 fn an_input_message_produces_a_reply_from_the_agent() {
     let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
         text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Cli,
     }])));
     let assistant = assistant_with(AlwaysRepliesTextLlm::new(), Arc::clone(&wire));
 
@@ -104,9 +105,28 @@ fn an_input_message_produces_a_reply_from_the_agent() {
 }
 
 #[test]
+fn the_client_supplied_source_reaches_the_request_started_event() {
+    let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
+        text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Android,
+    }])));
+    let assistant = assistant_with(AlwaysRepliesTextLlm::new(), Arc::clone(&wire));
+
+    run_session(assistant, Arc::clone(&wire));
+
+    let sent = wire.lock().unwrap().sent.clone();
+    let started = sent.iter().find_map(|message| match message {
+        ServerMessage::Event(agent_protocol::Event::RequestStarted { source, .. }) => Some(*source),
+        _ => None,
+    });
+    assert_eq!(started, Some(agent_protocol::RequestSource::Android));
+}
+
+#[test]
 fn progress_events_are_sent_before_the_final_reply() {
     let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
         text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Cli,
     }])));
     let assistant = assistant_with(AlwaysRepliesTextLlm::new(), Arc::clone(&wire));
 
@@ -128,6 +148,7 @@ fn progress_events_are_sent_before_the_final_reply() {
 fn an_llm_failure_sends_an_error_instead_of_a_reply() {
     let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
         text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Cli,
     }])));
     let assistant = assistant_with(FailingLlm::new(), Arc::clone(&wire));
 
@@ -171,6 +192,7 @@ fn a_served_session_writes_a_task_row_to_the_metrics_csv() {
     let dir = temp_dir();
     let wire = Arc::new(Mutex::new(FakeWire::new(vec![ClientMessage::Input {
         text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Cli,
     }])));
     let events = build_events(Arc::clone(&wire), Some(dir.clone()));
 
@@ -199,6 +221,7 @@ fn a_cancel_message_is_accepted_without_ending_the_session() {
         ClientMessage::Cancel,
         ClientMessage::Input {
             text: "hola".to_string(),
+            source: agent_protocol::RequestSource::Cli,
         },
     ])));
     let assistant = assistant_with(AlwaysRepliesTextLlm::new(), Arc::clone(&wire));

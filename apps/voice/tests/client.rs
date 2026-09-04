@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use agent_protocol::{ClientMessage, Event, LlmCallId, ServerMessage, TaskId};
+use agent_protocol::{ClientMessage, Event, LlmCallId, RequestSource, ServerMessage, TaskId};
 use voice::client::{ClientError, NalaClient, Wire};
 
 /// An in-memory `Wire`: `send` records every message it was asked to send,
@@ -81,11 +81,33 @@ fn a_stray_greeting_during_a_turn_is_forwarded_like_any_other_event() {
     let mut client = NalaClient::new(wire);
 
     let mut seen = Vec::new();
-    let reply = client.send("hola", |event| seen.push(event)).unwrap();
+    let reply = client
+        .send("hola", RequestSource::Voice, |event| seen.push(event))
+        .unwrap();
 
     assert_eq!(seen.len(), 1);
     assert!(matches!(seen[0], Event::Greeting { .. }));
     assert_eq!(reply, "listo");
+}
+
+#[test]
+fn send_puts_the_given_source_on_the_wire_message() {
+    let wire = FakeWire::new(vec![ServerMessage::Reply {
+        text: "listo".to_string(),
+    }]);
+    let mut client = NalaClient::new(wire);
+
+    client
+        .send("hola", RequestSource::Voice, |_event| {})
+        .unwrap();
+
+    assert!(matches!(
+        client.inner().sent.first(),
+        Some(ClientMessage::Input {
+            source: RequestSource::Voice,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -96,7 +118,9 @@ fn sends_input_and_returns_the_reply_text() {
     let mut client = NalaClient::new(wire);
 
     let reply = client
-        .send("hola", |_event| panic!("no event expected"))
+        .send("hola", RequestSource::Voice, |_event| {
+            panic!("no event expected")
+        })
         .unwrap();
 
     assert_eq!(reply, "listo");
@@ -126,7 +150,9 @@ fn invokes_the_callback_for_every_event_before_the_reply() {
     let mut client = NalaClient::new(wire);
 
     let mut seen = Vec::new();
-    let reply = client.send("hola", |event| seen.push(event)).unwrap();
+    let reply = client
+        .send("hola", RequestSource::Voice, |event| seen.push(event))
+        .unwrap();
 
     assert_eq!(reply, "listo");
     assert_eq!(seen.len(), 2);
@@ -141,7 +167,7 @@ fn a_server_error_message_is_returned_as_an_error_not_a_hang() {
     }]);
     let mut client = NalaClient::new(wire);
 
-    let result = client.send("hola", |_event| {});
+    let result = client.send("hola", RequestSource::Voice, |_event| {});
 
     assert!(matches!(result, Err(ClientError::Server(message)) if message == "boom"));
 }
@@ -151,7 +177,7 @@ fn the_connection_closing_without_a_reply_is_an_error_not_a_hang() {
     let wire = FakeWire::new(vec![]);
     let mut client = NalaClient::new(wire);
 
-    let result = client.send("hola", |_event| {});
+    let result = client.send("hola", RequestSource::Voice, |_event| {});
 
     assert!(matches!(result, Err(ClientError::ClosedWithoutReply)));
 }

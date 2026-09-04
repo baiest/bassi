@@ -136,7 +136,12 @@ where
                     Ok(text) if !text.trim().is_empty() => {
                         let text = text.trim().to_string();
                         println!("[HEARD] {text}");
-                        session.submit(text);
+                        // This connection doesn't yet declare whether it's
+                        // the PC overlay or the Android app (both speak the
+                        // same audio protocol) -- `Voice` is still strictly
+                        // more useful than `Unknown` for the metrics
+                        // breakdown until that handshake exists.
+                        session.submit(text, agent_protocol::RequestSource::Voice);
                     }
                     Ok(_) => {}
                     Err(error) => {

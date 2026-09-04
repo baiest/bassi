@@ -62,6 +62,7 @@ fn a_client_can_complete_one_turn_over_a_real_socket() {
 
     let input = serde_json::to_string(&ClientMessage::Input {
         text: "hola".to_string(),
+        source: agent_protocol::RequestSource::Cli,
     })
     .unwrap();
     client.send(Message::Text(input)).unwrap();

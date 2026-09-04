@@ -1,4 +1,4 @@
-use agent_protocol::EventSink;
+use agent_protocol::{EventSink, RequestSource};
 use tts::Speech;
 use voice::bootstrap;
 use voice::client::ClientError;
@@ -76,7 +76,9 @@ fn run_local() {
         };
         println!("Vos: {input}");
 
-        match client.send(input.trim(), |event| events.emit(event)) {
+        match client.send(input.trim(), RequestSource::Voice, |event| {
+            events.emit(event)
+        }) {
             Ok(response) => {
                 println!("{response}");
                 // The whole answer goes out in a single `say` call: a

@@ -2,7 +2,7 @@
 //! Nala never sees raw audio — this client only ever sends text and
 //! receives text/events back.
 
-use agent_protocol::{ClientMessage, Event, ServerMessage};
+use agent_protocol::{ClientMessage, Event, RequestSource, ServerMessage};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -35,6 +35,12 @@ impl<W: Wire> NalaClient<W> {
         Self { wire }
     }
 
+    /// The wrapped wire, for callers (mainly tests) that need to inspect
+    /// what was sent to it.
+    pub fn inner(&self) -> &W {
+        &self.wire
+    }
+
     /// Reads the one-time `Event::Greeting` Nala sends right after a
     /// connection opens, before any turn. Must be called before `send()` —
     /// a turn's own recv loop doesn't expect this message, so it would
@@ -56,10 +62,12 @@ impl<W: Wire> NalaClient<W> {
     pub fn send(
         &mut self,
         text: &str,
+        source: RequestSource,
         mut on_event: impl FnMut(Event),
     ) -> Result<String, ClientError> {
         self.wire.send(&ClientMessage::Input {
             text: text.to_string(),
+            source,
         })?;
 
         loop {
