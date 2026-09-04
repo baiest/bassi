@@ -80,6 +80,17 @@ pub enum DeviceMessage {
     Pong {
         id: u64,
     },
+    /// Something happened on the device that Nala didn't ask for -- a
+    /// button press, a low-battery report, ... -- for the autonomous
+    /// event loop to reason about. Adding this variant is
+    /// backwards-compatible (an older device simply never sends one), so
+    /// it doesn't bump `PROTOCOL_VERSION`. `kind` and `payload` are opaque
+    /// to this crate: interpreting them is the autonomous event loop's
+    /// job, not the wire protocol's.
+    Event {
+        kind: String,
+        payload: serde_json::Value,
+    },
 }
 
 /// A message Nala sends to a connected device daemon.
@@ -226,5 +237,25 @@ mod tests {
             serde_json::from_str(r#"{"type":"NotARealVariant"}"#);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_device_event_round_trips_through_json() {
+        let message = DeviceMessage::Event {
+            kind: "battery_low".to_string(),
+            payload: serde_json::json!({"percent": 9}),
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: DeviceMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, message);
+        match decoded {
+            DeviceMessage::Event { kind, payload } => {
+                assert_eq!(kind, "battery_low");
+                assert_eq!(payload, serde_json::json!({"percent": 9}));
+            }
+            _ => panic!("expected Event"),
+        }
     }
 }

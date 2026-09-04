@@ -14,7 +14,9 @@ use device_protocol::{DeviceMessage, NalaMessage, PROTOCOL_VERSION, RejectReason
 use tungstenite::{Message, WebSocket};
 
 use crate::adapters::devices::websocket::{DeviceSink, WsDevice};
+use crate::application::autonomous::event::AutonomousEvent;
 use crate::application::devices::registry::DeviceRegistry;
+use crate::ports::autonomous::AutonomousEventQueue;
 
 /// How often a connection's reading thread polls for the next message. A
 /// blocking read would hold the wire's lock indefinitely, starving
@@ -94,6 +96,7 @@ fn handle_connection(
     stream: TcpStream,
     registry: Arc<DeviceRegistry<Device>>,
     token: Option<String>,
+    events: Option<Arc<dyn AutonomousEventQueue>>,
 ) {
     // Short read timeout so `poll()` returns `Idle` instead of blocking
     // forever — `WsDevice::invoke`, called from a completely different
@@ -153,6 +156,12 @@ fn handle_connection(
     let device = WsDevice::new(name, capabilities, Arc::clone(&wire));
     registry.register(device_id.clone(), device.clone());
     println!("Device '{device_id}' connected.");
+    publish_device_event(
+        events.as_deref(),
+        &device_id,
+        "device_connected",
+        serde_json::Value::Null,
+    );
 
     loop {
         let event = { wire.lock().unwrap().poll() };
@@ -166,6 +175,9 @@ fn handle_connection(
             // of this session's protocol — ignored rather than tearing the
             // connection down over it.
             Ok(DeviceEvent::Message(DeviceMessage::Hello { .. })) => {}
+            Ok(DeviceEvent::Message(DeviceMessage::Event { kind, payload })) => {
+                publish_device_event(events.as_deref(), &device_id, kind, payload);
+            }
             Ok(DeviceEvent::Idle) => {}
             Ok(DeviceEvent::Closed) => break,
             Err(error) => {
@@ -177,6 +189,12 @@ fn handle_connection(
 
     registry.remove(&device_id);
     println!("Device '{device_id}' disconnected.");
+    publish_device_event(
+        events.as_deref(),
+        &device_id,
+        "device_disconnected",
+        serde_json::Value::Null,
+    );
 }
 
 /// Blocks (polling) until the connection's first message arrives and is a
@@ -214,13 +232,34 @@ fn validate_hello(
     }
 }
 
+/// Publishes one `AutonomousEvent` built from a device's report -- either
+/// a `DeviceMessage::Event` it sent, or a synthetic `device_connected` /
+/// `device_disconnected` this listener generates itself. `events` is
+/// `None` when no autonomous event queue is running (autonomous events
+/// disabled, or an older caller); publishing is then a no-op rather than
+/// a special case at every call site.
+fn publish_device_event(
+    events: Option<&dyn AutonomousEventQueue>,
+    device_id: &str,
+    kind: impl Into<String>,
+    payload: serde_json::Value,
+) {
+    if let Some(events) = events {
+        events.publish(AutonomousEvent::new(device_id, kind, payload));
+    }
+}
+
 /// Binds `addr` and serves one device connection per accepted socket, each
 /// on its own thread, forever. `token` is `None` when `NALA_DEVICE_TOKEN`
 /// isn't set — every connection is then rejected (see `validate_hello`).
+/// `events` is the autonomous event queue a connected device's reports
+/// (and its connect/disconnect) are published to; `None` disables
+/// autonomous events entirely for this listener.
 pub fn serve(
     addr: &str,
     registry: Arc<DeviceRegistry<Device>>,
     token: Option<String>,
+    events: Option<Arc<dyn AutonomousEventQueue>>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     println!("Nala listening for devices on ws://{addr}");
@@ -230,7 +269,8 @@ pub fn serve(
             Ok(stream) => {
                 let registry = Arc::clone(&registry);
                 let token = token.clone();
-                thread::spawn(move || handle_connection(stream, registry, token));
+                let events = events.clone();
+                thread::spawn(move || handle_connection(stream, registry, token, events));
             }
             Err(error) => eprintln!("Warning: failed to accept a device connection: {error}"),
         }
@@ -273,5 +313,32 @@ mod tests {
             validate_hello(PROTOCOL_VERSION, "anything", None),
             Err(RejectReason::BadToken)
         );
+    }
+
+    #[test]
+    fn a_published_device_event_reaches_the_queue_tagged_with_its_device_id() {
+        use crate::adapters::autonomous::in_memory_queue::InMemoryEventQueue;
+        use crate::ports::autonomous::AutonomousEventQueue;
+
+        let queue = InMemoryEventQueue::new(4);
+        publish_device_event(
+            Some(&queue),
+            "esp32-bedroom",
+            "battery_low",
+            serde_json::json!({"percent": 9}),
+        );
+
+        let event = queue.next().expect("the event should have been published");
+        assert_eq!(event.source, "esp32-bedroom");
+        assert_eq!(event.kind, "battery_low");
+        assert_eq!(event.payload, serde_json::json!({"percent": 9}));
+    }
+
+    #[test]
+    fn publishing_with_no_queue_configured_is_a_no_op() {
+        // No queue running (the local REPL has no device server at all,
+        // and a device server can still start with autonomous events
+        // disabled) must not panic.
+        publish_device_event(None, "esp32-bedroom", "battery_low", serde_json::json!({}));
     }
 }
