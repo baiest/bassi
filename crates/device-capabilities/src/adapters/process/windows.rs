@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::ports::process::{Process, ProcessError};
@@ -9,6 +10,13 @@ use crate::ports::process::{Process, ProcessError};
 /// Short enough that a quick command isn't held up noticeably past its real
 /// completion, long enough not to spin the CPU.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+/// Extra time, past the child's own deadline, `spawn` gives the reader
+/// threads to hand over whatever they already read. Without it, a command
+/// that finishes right at its deadline would have zero budget left to
+/// deliver output it already wrote before `recv_timeout` gives up. Small
+/// because it only covers a race at the boundary, not the actual read.
+const READER_DRAIN_GRACE: Duration = Duration::from_millis(250);
 
 pub struct Windows;
 
@@ -77,21 +85,25 @@ impl Process for Windows {
         // Read concurrently, not after `wait()`: a child that writes more
         // than the OS pipe buffer holds would otherwise block forever with
         // nobody draining it, deadlocking against our own poll loop below.
+        // Each reader hands its buffer over a channel instead of being
+        // joined directly -- see the `recv_timeout` below for why.
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
-        let stdout_reader = std::thread::spawn(move || {
+        let (stdout_tx, stdout_rx) = mpsc::channel();
+        let (stderr_tx, stderr_rx) = mpsc::channel();
+        std::thread::spawn(move || {
             let mut buffer = Vec::new();
             if let Some(stdout) = stdout_pipe.as_mut() {
                 let _ = stdout.read_to_end(&mut buffer);
             }
-            buffer
+            let _ = stdout_tx.send(buffer);
         });
-        let stderr_reader = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let mut buffer = Vec::new();
             if let Some(stderr) = stderr_pipe.as_mut() {
                 let _ = stderr.read_to_end(&mut buffer);
             }
-            buffer
+            let _ = stderr_tx.send(buffer);
         });
 
         let deadline = Instant::now() + timeout;
@@ -114,8 +126,25 @@ impl Process for Windows {
             }
         };
 
-        let stdout = stdout_reader.join().unwrap_or_default();
-        let stderr = stderr_reader.join().unwrap_or_default();
+        // A grandchild that inherited a pipe's write handle (e.g. `start ""
+        // "notepad"` -- notepad.exe outlives cmd.exe and keeps the handle)
+        // means `read_to_end` never sees EOF, so joining the reader thread
+        // directly can block forever even though the command itself already
+        // finished. `recv_timeout`, bounded by whatever remains of the
+        // deadline (plus a small grace, see `READER_DRAIN_GRACE`), makes
+        // sure `spawn` never blocks past `timeout` either way -- if the
+        // channel doesn't answer in time, its thread is simply abandoned (a
+        // deliberate leak, same trade-off as `crates/mcp/child_process.rs`):
+        // an inherited handle can wedge that thread forever, but it never
+        // wedges the caller. See BAS-61.
+        let grace = deadline
+            .saturating_duration_since(Instant::now())
+            .max(READER_DRAIN_GRACE);
+        let stdout = stdout_rx.recv_timeout(grace).unwrap_or_default();
+        let grace = deadline
+            .saturating_duration_since(Instant::now())
+            .max(READER_DRAIN_GRACE);
+        let stderr = stderr_rx.recv_timeout(grace).unwrap_or_default();
 
         // The job is only meant to kill stragglers on a timeout (handled
         // above, before this point). On a normal return, dropping `job`
