@@ -11,7 +11,13 @@ pub const DEFAULT_LIST_APPS_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The command run to enumerate installed apps. `Get-StartApps` lists both
 /// classic desktop apps and UWP/Store apps registered in the Start Menu.
-const LIST_APPS_COMMAND: &str = "powershell -Command \"Get-StartApps | ConvertTo-Json -Compress\"";
+/// `[Console]::OutputEncoding` is set to UTF-8 first -- without it,
+/// PowerShell writes redirected stdout in the console's codepage (e.g.
+/// CP1252 on a Spanish Windows), so an app name with an accented character
+/// (e.g. "Configuración") comes back as invalid UTF-8 and
+/// `String::from_utf8` in `adapters/process/windows.rs` rejects the whole
+/// output.
+const LIST_APPS_COMMAND: &str = "powershell -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress\"";
 
 /// Cap on how many app names are surfaced to the model, so a machine with
 /// hundreds of installed apps doesn't flood its context.
