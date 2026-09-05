@@ -75,10 +75,7 @@ fn returns_even_when_a_grandchild_still_holds_the_pipe() {
     let start = std::time::Instant::now();
     let _ = process.spawn(
         "cmd",
-        &[
-            "/C",
-            "start \"\" /B cmd /C ping -n 20 127.0.0.1 >NUL",
-        ],
+        &["/C", "start \"\" /B cmd /C ping -n 20 127.0.0.1 >NUL"],
         Duration::from_secs(1),
     );
     let elapsed = start.elapsed();
@@ -88,4 +85,37 @@ fn returns_even_when_a_grandchild_still_holds_the_pipe() {
         "expected spawn to return promptly even with a grandchild holding \
          the pipe open, took {elapsed:?}"
     );
+}
+
+/// `spawn_detached` sidesteps `returns_even_when_a_grandchild_still_holds_
+/// the_pipe`'s whole problem instead of just bounding it: no pipes are ever
+/// requested, so there is nothing for the grandchild to inherit and no
+/// drain wait at all. Tighter bound than that test for exactly that reason.
+#[test]
+fn spawn_detached_returns_promptly_for_a_launcher_whose_grandchild_outlives_it() {
+    let mut process = Windows::new();
+
+    let start = std::time::Instant::now();
+    let result = process.spawn_detached(
+        "cmd",
+        &["/C", "start \"\" /B cmd /C ping -n 20 127.0.0.1 >NUL"],
+        Duration::from_secs(1),
+    );
+    let elapsed = start.elapsed();
+
+    assert!(result.is_ok());
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "expected the detached path to return almost instantly -- no pipes \
+         means no drain to wait out, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn spawn_detached_reports_a_failed_launch() {
+    let mut process = Windows::new();
+
+    let result = process.spawn_detached("cmd", &["/C", "exit 1"], Duration::from_secs(5));
+
+    assert!(matches!(result, Err(ProcessError::ProcessFailed(_))));
 }

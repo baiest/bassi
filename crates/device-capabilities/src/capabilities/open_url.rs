@@ -87,10 +87,10 @@ impl<C: Computer> Capability for OpenUrlTool<C> {
         // a browser, so it isn't in this chain at all.
         if self
             .computer
-            .execute_command(&format!("start \"\" \"{}\"", args.url), self.timeout)
+            .execute_command_detached(&format!("start \"\" \"{}\"", args.url), self.timeout)
             .is_err()
         {
-            self.computer.execute_command(
+            self.computer.execute_command_detached(
                 &format!("rundll32 url.dll,FileProtocolHandler \"{}\"", args.url),
                 self.timeout,
             )?;

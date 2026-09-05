@@ -45,6 +45,29 @@ fn turns_volume_down() {
     );
 }
 
+/// `volume` never reads its command's output either, so it goes through
+/// `execute_command_detached` -- see BAS-61.
+#[test]
+fn adjusts_volume_without_capturing_output() {
+    let computer = FakeComputer::new();
+    let mut tool: VolumeTool<FakeComputer> = VolumeTool::new(computer);
+
+    let args = VolumeArgs {
+        action: "up".to_string(),
+    };
+
+    let result = tool.execute(args);
+
+    assert!(result.is_ok());
+    assert_eq!(
+        tool.computer.detached_commands,
+        vec![
+            r#"powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys([char]175)""#
+                .to_string()
+        ]
+    );
+}
+
 #[test]
 fn toggles_mute() {
     let computer = FakeComputer::new();

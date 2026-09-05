@@ -30,5 +30,20 @@ pub trait Computer {
         command: &str,
         timeout: Duration,
     ) -> Result<String, ComputerError>;
+
+    /// Mirrors `Process::spawn_detached`: runs `command` without capturing
+    /// its output, so a fire-and-forget launcher (`open_app`, `open_url`)
+    /// never opens a pipe a GUI grandchild could inherit and hold open
+    /// forever -- see BAS-61. Default body delegates to `execute_command`,
+    /// so every existing `Computer` implementation keeps compiling
+    /// unchanged.
+    fn execute_command_detached(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), ComputerError> {
+        self.execute_command(command, timeout).map(|_| ())
+    }
+
     fn get_context(&mut self) -> Result<ComputerContext, ComputerError>;
 }
