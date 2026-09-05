@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -39,12 +40,24 @@ impl Process for Windows {
             ));
         }
 
+        // `raw_arg`, not `.arg`/`.args`: every caller here passes `/C` plus
+        // an already-fully-quoted command string (e.g. `start "" "<url>"`)
+        // for cmd.exe's own quirky `/C` parser to interpret. `.arg` would
+        // re-escape an argument that already contains quotes using Rust's
+        // CreateProcess quoting rules, producing a Win32 command line
+        // cmd.exe doesn't parse the way a human typing it would expect --
+        // see BAS-60. `raw_arg` inserts each argument into the command
+        // line exactly as given, with no extra quoting.
+        let mut cmd = Command::new(command);
+        for arg in args {
+            cmd.raw_arg(arg);
+        }
+
         // Piped rather than `.output()`'s blocking wait, so a command that
         // runs past `timeout` can be killed instead of hanging the turn
         // forever (e.g. a GUI app that never returns, or a command that
         // waits on input nala never provides).
-        let mut child = Command::new(command)
-            .args(args)
+        let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
