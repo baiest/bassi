@@ -1,4 +1,5 @@
 use std::io::Read;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -50,10 +51,16 @@ impl Windows {
         // CreateProcess quoting rules, producing a Win32 command line
         // cmd.exe doesn't parse the way a human typing it would expect --
         // see BAS-60. `raw_arg` inserts each argument into the command
-        // line exactly as given, with no extra quoting.
+        // line exactly as given, with no extra quoting. Windows-only API,
+        // so it's gated: this adapter only ever runs on Windows (it shells
+        // out to `cmd.exe`), but the crate still has to *compile* on the
+        // Linux CI runner -- `.arg` is never actually exercised there.
         let mut cmd = Command::new(command);
         for arg in args {
+            #[cfg(windows)]
             cmd.raw_arg(arg);
+            #[cfg(not(windows))]
+            cmd.arg(arg);
         }
 
         // Piped rather than `.output()`'s blocking wait, so a command that
