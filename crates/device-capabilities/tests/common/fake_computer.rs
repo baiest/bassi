@@ -33,6 +33,13 @@ pub struct FakeComputer {
     pub fail_when_command_contains: Option<String>,
     pub should_fail_context: bool,
     pub output: String,
+    /// Every command passed to `execute_command_detached`, in order -- lets
+    /// a test assert a capability used the detached (no-output) path
+    /// instead of `execute_command`. `execute_command_detached` also still
+    /// records into `executed_command`/`commands_run` above, so an existing
+    /// assertion on those keeps working regardless of which path a
+    /// capability calls.
+    pub detached_commands: Vec<String>,
 }
 
 impl FakeComputer {
@@ -44,6 +51,7 @@ impl FakeComputer {
             fail_when_command_contains: None,
             should_fail_context: false,
             output: String::new(),
+            detached_commands: Vec::new(),
         }
     }
 }
@@ -71,6 +79,20 @@ impl Computer for FakeComputer {
         self.commands_run.push(name.to_string());
 
         Ok(self.output.clone())
+    }
+
+    fn execute_command_detached(
+        &mut self,
+        name: &str,
+        timeout: Duration,
+    ) -> Result<(), ComputerError> {
+        // Recorded only on success, same as `commands_run` above -- a
+        // command that failed (e.g. `fail_when_command_contains`) was never
+        // actually "run" as far as either log is concerned.
+        self.execute_command(name, timeout).inspect(|_| {
+            self.detached_commands.push(name.to_string());
+        })?;
+        Ok(())
     }
 
     fn get_context(&mut self) -> Result<ComputerContext, ComputerError> {

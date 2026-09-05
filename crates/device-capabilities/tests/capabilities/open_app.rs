@@ -21,6 +21,28 @@ fn opens_an_app_by_name() {
     );
 }
 
+/// `open_app` never reads its command's output, so it goes through
+/// `execute_command_detached` -- see BAS-61: a fire-and-forget launcher
+/// piping output for nothing is exactly what let a GUI grandchild hang the
+/// daemon.
+#[test]
+fn launches_without_capturing_output() {
+    let computer = FakeComputer::new();
+    let mut tool: OpenAppTool<FakeComputer> = OpenAppTool::new(computer);
+
+    let args = OpenAppArgs {
+        app: "notepad".to_string(),
+    };
+
+    let result = tool.execute(args);
+
+    assert!(result.is_ok());
+    assert_eq!(
+        tool.computer.detached_commands,
+        vec!["start \"\" \"notepad\"".to_string()]
+    );
+}
+
 #[test]
 fn opens_an_app_by_full_path() {
     let computer = FakeComputer::new();

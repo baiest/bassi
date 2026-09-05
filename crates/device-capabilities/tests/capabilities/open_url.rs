@@ -27,6 +27,28 @@ fn opens_a_valid_http_url() {
     );
 }
 
+/// Neither `start` nor its `rundll32` fallback ever have their output read,
+/// so both go through `execute_command_detached` -- see BAS-61: a
+/// fire-and-forget launcher piping output for nothing is exactly what let a
+/// GUI grandchild (the browser) hang the daemon.
+#[test]
+fn opens_the_url_without_capturing_output() {
+    let computer = FakeComputer::new();
+    let mut tool: OpenUrlTool<FakeComputer> = OpenUrlTool::new(computer);
+
+    let args = OpenUrlArgs {
+        url: "https://example.com".to_string(),
+    };
+
+    let result = tool.execute(args);
+
+    assert!(result.is_ok());
+    assert_eq!(
+        tool.computer.detached_commands,
+        vec!["start \"\" \"https://example.com\"".to_string()]
+    );
+}
+
 #[test]
 fn falls_back_to_rundll32_when_start_fails() {
     let mut computer = FakeComputer::new();
@@ -42,6 +64,12 @@ fn falls_back_to_rundll32_when_start_fails() {
     assert!(result.is_ok());
     assert_eq!(
         tool.computer.commands_run,
+        vec!["rundll32 url.dll,FileProtocolHandler \"https://example.com\"".to_string()]
+    );
+    // The fallback also never reads its output -- both attempts go through
+    // the detached path.
+    assert_eq!(
+        tool.computer.detached_commands,
         vec!["rundll32 url.dll,FileProtocolHandler \"https://example.com\"".to_string()]
     );
 }

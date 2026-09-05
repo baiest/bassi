@@ -98,7 +98,7 @@ impl<C: Computer> Capability for VolumeTool<C> {
         let action = VolumeAction::parse(&args.action)?;
 
         self.computer
-            .execute_command(action.command(), self.timeout)?;
+            .execute_command_detached(action.command(), self.timeout)?;
 
         Ok(format!("Volume action '{}' sent.", args.action))
     }

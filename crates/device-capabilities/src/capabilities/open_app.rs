@@ -77,7 +77,7 @@ impl<C: Computer> Capability for OpenAppTool<C> {
         validate_app(&args.app)?;
 
         self.computer
-            .execute_command(&format!("start \"\" \"{}\"", args.app), self.timeout)?;
+            .execute_command_detached(&format!("start \"\" \"{}\"", args.app), self.timeout)?;
 
         Ok(format!("Opened {}.", args.app))
     }

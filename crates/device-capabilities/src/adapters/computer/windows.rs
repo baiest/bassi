@@ -36,6 +36,16 @@ impl<P: Process, E: Environment> Computer for Windows<P, E> {
             .map_err(|error| ComputerError::CommandFailed(format!("{error:?}")))
     }
 
+    fn execute_command_detached(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<(), ComputerError> {
+        self.process
+            .spawn_detached("cmd", &["/C", command], timeout)
+            .map_err(|error| ComputerError::CommandFailed(format!("{error:?}")))
+    }
+
     fn get_context(&mut self) -> Result<ComputerContext, ComputerError> {
         let username = self.environment.var("USERNAME")?;
         let home_dir = self.environment.var("USERPROFILE")?;
