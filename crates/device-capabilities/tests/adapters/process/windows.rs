@@ -17,6 +17,26 @@ fn returns_the_command_output() {
 }
 
 #[test]
+fn an_argument_containing_its_own_quotes_reaches_cmd_unmangled() {
+    // `Command::new("cmd").args(["/C", command])` re-escapes `command` with
+    // Rust's own CreateProcess quoting rules even when it already contains
+    // its own embedded quotes (e.g. `start "" "<url>"`) -- producing a
+    // Win32 command line cmd.exe's own /C parser doesn't interpret the way
+    // a human typing it would expect. `echo` makes this reproducible
+    // deterministically, without a GUI: it should print exactly what
+    // follows `/C`, quotes included and no extra backslashes. See BAS-60.
+    let mut process = Windows::new();
+
+    let result = process.spawn(
+        "cmd",
+        &["/C", "echo \"\" \"hello\""],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(result.unwrap().trim(), "\"\" \"hello\"");
+}
+
+#[test]
 fn kills_a_command_that_runs_past_the_timeout() {
     let mut process = Windows::new();
 
